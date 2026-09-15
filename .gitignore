@@ -1,0 +1,99 @@
+# =============================================================================
+# Fun Learning Kids - Git Ignore Configuration
+# Protects private credentials, generated media, runtime history, logs & cache
+# =============================================================================
+
+# --- Authentication & Secrets (CRITICAL) ---
+credentials.json
+token.json
+.env
+.env.*
+*.pem
+*.key
+*.cert
+*.pfx
+
+# Allow example / template files
+!*.example
+!*.example.json
+!*.example.py
+!.env.example
+
+# --- Python & Bytecode ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Generated Media Directories (Keep folder structures via .gitkeep) ---
+/audio/*
+!/audio/.gitkeep
+
+/video/*
+!/video/.gitkeep
+
+/images/*
+!/images/.gitkeep
+
+/thumbnails/*
+!/thumbnails/.gitkeep
+
+/cartoon/output/*
+!/cartoon/output/.gitkeep
+
+/cartoon/thumbnails/*
+!/cartoon/thumbnails/.gitkeep
+
+# --- Runtime Logs & History ---
+/logs/*
+!/logs/.gitkeep
+
+/history/*.json
+/history/*.txt
+!/history/.gitkeep
+
+# --- Temporary & Scratch Files ---
+*.tmp
+*.temp
+*.bak
+*.backup
+*.swp
+*.swo
+*~
+*.cache
+*.log
+ffmpeg_render.log
+
+# --- OS & Editor Artifacts ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+[Nn]ecro.txt
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Intermediate TTS chunks & test render outputs
+/cartoon/assets/audio/seg_*
+/cartoon/assets_v3/audio/seg_*
+/cartoon/**/test_*.png

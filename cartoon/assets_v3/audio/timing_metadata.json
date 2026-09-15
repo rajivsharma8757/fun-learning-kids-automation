@@ -1,0 +1,56 @@
+[
+  {
+    "scene_id": 1,
+    "speaker": "narrator",
+    "text_hi": "मीमी अपने प्यारे कमरे में खेल रही थी, तभी उसे एक सुंदर छोटी रेलगाड़ी दिखी!",
+    "text_en": "Mimi was playing in her lovely room, when she spotted a cute little toy train!",
+    "start_time": 0.0,
+    "end_time": 6.36,
+    "duration": 6.36
+  },
+  {
+    "scene_id": 2,
+    "speaker": "narrator",
+    "text_hi": "मीमी ने झुककर रेलगाड़ी को उठाया। वाह! कितने प्यारे पहिए और घंटी!",
+    "text_en": "Mimi gently picked up the train. Wow! Such cute wheels and a little bell!",
+    "start_time": 6.61,
+    "end_time": 13.546,
+    "duration": 6.936
+  },
+  {
+    "scene_id": 3,
+    "speaker": "narrator",
+    "text_hi": "उसने रेलगाड़ी को लकड़ी की पटरी पर रखा। अब शुरू होगा असली मज़ा!",
+    "text_en": "She placed the train on the wooden track. Now the real fun begins!",
+    "start_time": 13.796,
+    "end_time": 19.652,
+    "duration": 5.856
+  },
+  {
+    "scene_id": 4,
+    "speaker": "narrator",
+    "text_hi": "छुक-छुक, चूं-चूं! रेलगाड़ी दौड़ने लगी! मीमी खुशी से तालियाँ बजाने लगी!",
+    "text_en": "Chug-chug, choo-choo! The train started rolling! Mimi clapped with delight!",
+    "start_time": 19.902,
+    "end_time": 27.51,
+    "duration": 7.608
+  },
+  {
+    "scene_id": 5,
+    "speaker": "narrator",
+    "text_hi": "रेलगाड़ी पुल से गुजरी और मीमी हँसते हुए उसके पीछे चलने लगी!",
+    "text_en": "The train crossed the bridge and Mimi happily followed behind it!",
+    "start_time": 27.76,
+    "end_time": 32.848,
+    "duration": 5.088
+  },
+  {
+    "scene_id": 6,
+    "speaker": "narrator",
+    "text_hi": "सावधानी से खेलने से खिलौने खुश रहते हैं! फन लर्निंग किड्स के साथ सीखते रहिए!",
+    "text_en": "Playing with care keeps toys happy! Keep learning with Fun Learning Kids!",
+    "start_time": 33.098,
+    "end_time": 39.962,
+    "duration": 6.864
+  }
+]

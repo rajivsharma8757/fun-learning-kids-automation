@@ -1,0 +1,21 @@
+# Fun Learning Kids - Core Python Dependencies
+# Tested and validated on Python 3.10, 3.11, and 3.12
+
+# Text-to-Speech Engine (Hindi Neural Voices)
+edge-tts>=7.0.0
+
+# Graphic Rendering, Rig Compositing, and Thumbnails
+Pillow>=10.0.0
+
+# Scientific & Array Computations for Audio/Video Kinematics
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Google YouTube Data API v3 & OAuth 2.0
+google-api-python-client>=2.100.0
+google-auth>=2.20.0
+google-auth-oauthlib>=1.0.0
+google-auth-httplib2>=0.2.0
+
+# HTTP & Web Utilities
+requests>=2.30.0

@@ -1,0 +1,56 @@
+[
+  {
+    "scene_id": 1,
+    "speaker": "narrator",
+    "text_hi": "एक सुंदर और हरे-भरे जंगल में, चिंटू खरगोश खुशी से उछल-कूद कर रहा था!",
+    "text_en": "In a beautiful green forest, Chintu the bunny was hopping happily!",
+    "start_time": 0.0,
+    "end_time": 5.6,
+    "duration": 5.6
+  },
+  {
+    "scene_id": 2,
+    "speaker": "narrator",
+    "text_hi": "तभी उसे पेड़ के नीचे एक बड़ा, मीठा और रसीला लाल सेब मिला! वाह, कितना स्वादिष्ट!",
+    "text_en": "Suddenly, he found a big, sweet, juicy red apple! Wow, so yummy!",
+    "start_time": 5.85,
+    "end_time": 13.85,
+    "duration": 8.0
+  },
+  {
+    "scene_id": 3,
+    "speaker": "narrator",
+    "text_hi": "तभी उसका प्यारा दोस्त गोलू भालू वहाँ आया। गोलू बहुत भूखा और उदास था।",
+    "text_en": "Just then, his dear friend Golu Bear arrived. Golu was very hungry and sad.",
+    "start_time": 14.1,
+    "end_time": 20.626,
+    "duration": 6.526
+  },
+  {
+    "scene_id": 4,
+    "speaker": "narrator",
+    "text_hi": "चिंटू मुस्कुराया और बोला—'गोलू, हम यह सेब मिलकर खाएंगे!' चिंटू ने सेब बाँट दिया।",
+    "text_en": "Chintu smiled and said: 'Golu, we will share this apple together!' He shared the apple.",
+    "start_time": 20.876,
+    "end_time": 27.716,
+    "duration": 6.84
+  },
+  {
+    "scene_id": 5,
+    "speaker": "narrator",
+    "text_hi": "दोनों दोस्तों ने मिलकर सेब खाया और खुशी से झूमने लगे!",
+    "text_en": "Both friends ate the apple together and danced with joy!",
+    "start_time": 27.966,
+    "end_time": 32.05,
+    "duration": 4.084
+  },
+  {
+    "scene_id": 6,
+    "speaker": "narrator",
+    "text_hi": "बाँट कर खाने से खुशी दोगुनी हो जाती है! फन लर्निंग किड्स के साथ सीखते रहिए!",
+    "text_en": "Sharing doubles the happiness! Keep learning with Fun Learning Kids!",
+    "start_time": 32.3,
+    "end_time": 38.686,
+    "duration": 6.386
+  }
+]
