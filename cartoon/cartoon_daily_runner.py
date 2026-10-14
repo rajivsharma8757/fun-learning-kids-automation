@@ -38,6 +38,7 @@ from cartoon.config import (
 from cartoon.story_engine import StoryEngine
 from cartoon.subtitles import generate_subtitles_file
 from notifier import send_notification
+import job_tracker
 
 logger = logging.getLogger("kids_automation")
 
@@ -77,7 +78,7 @@ def synthesize_story_narration(scenes, output_wav, output_json, voice="hi-IN-Swa
         seg_mp3 = os.path.join(temp_dir, f"seg_{idx+1}.mp3")
         seg_wav = os.path.join(temp_dir, f"seg_{idx+1}.wav")
 
-        # Edge-TTS synthesis with retries
+        # Edge-TTS synthesis with retries and backoff
         synthesized = False
         for attempt in range(1, 6):
             if os.path.exists(seg_mp3):
@@ -93,13 +94,19 @@ def synthesize_story_narration(scenes, output_wav, output_json, voice="hi-IN-Swa
                 "--write-media", seg_mp3
             ]
             try:
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=50)
                 if res.returncode == 0 and os.path.exists(seg_mp3) and os.path.getsize(seg_mp3) > 1000:
                     synthesized = True
                     break
+                else:
+                    err = res.stderr.strip()[:200]
+                    logger.warning(f"TTS segment {idx+1} attempt {attempt} error: {err}")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"TTS segment {idx+1} attempt {attempt} timed out after 50s")
             except Exception as e:
                 logger.warning(f"TTS segment {idx+1} attempt {attempt} failed: {e}")
-            time.sleep(1.5 * attempt)
+            wait_time = (2 ** attempt) + 0.5
+            time.sleep(wait_time)
 
         if not synthesized:
             raise RuntimeError(f"Failed to synthesize narration for scene {idx+1}")
@@ -319,6 +326,17 @@ def run_daily_cartoon(dry_run=True, style=None, story_id=None, privacy_status="p
             logger.info(f"   Thumbnail:  {thumb_file}")
             logger.info("   (Skipping YouTube upload in dry-run mode).")
 
+            job_tracker.update_job(
+                "cartoon",
+                state="dry_run_success",
+                story_id=s_id,
+                style=actual_style,
+                title=story["title_en"],
+                video_path=video_file,
+                thumb_path=thumb_file,
+                video_hash=video_hash
+            )
+
             engine.record_run(
                 story_id=s_id,
                 style=actual_style,
@@ -339,16 +357,29 @@ def run_daily_cartoon(dry_run=True, style=None, story_id=None, privacy_status="p
         logger.info("🚀 Initiating YouTube Upload for Cartoon Video 3...")
         from uploader import upload_video_to_youtube
 
+        job_tracker.update_job(
+            "cartoon",
+            state=job_tracker.STATE_UPLOAD_PENDING,
+            story_id=s_id,
+            style=actual_style,
+            title=story["title_en"],
+            video_path=video_file,
+            thumb_path=thumb_file,
+            video_hash=video_hash
+        )
+
         ok_upload, vid_id, upload_res = upload_video_to_youtube(
             video_path=video_file,
             metadata=metadata,
             thumbnail_path=thumb_file,
             privacy_status=privacy_status,
-            interactive=False
+            interactive=False,
+            slot="cartoon"
         )
 
         if not ok_upload:
             logger.error(f"❌ YouTube upload failed for Cartoon Video 3: {upload_res}")
+            job_tracker.update_job("cartoon", state=job_tracker.STATE_FAILED, error_message=str(upload_res))
             send_notification(
                 "Fun Learning Kids — Cartoon Error",
                 f"Cartoon Video 3 upload failed: {str(upload_res)[:80]}",
@@ -387,6 +418,7 @@ def run_daily_cartoon(dry_run=True, style=None, story_id=None, privacy_status="p
     except Exception as e:
         err_msg = f"Cartoon Video 3 encountered an isolated exception: {e}"
         logger.error(f"❌ {err_msg}", exc_info=True)
+        job_tracker.update_job("cartoon", state=job_tracker.STATE_FAILED, error_message=str(e))
         send_notification(
             "Fun Learning Kids — Cartoon Exception",
             f"Cartoon pipeline failed: {str(e)[:100]}",

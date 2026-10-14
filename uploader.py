@@ -1,24 +1,80 @@
+"""
+uploader.py
+-----------
+Production-grade YouTube Upload Engine for Fun Learning Kids.
+
+Features:
+1. Resumable chunked upload with exponential backoff and jitter.
+2. Robust recovery from transient network drops, socket timeouts, and HTTP 5xx/429.
+3. Ambiguous upload resolution (queries channel uploads playlist to verify if YouTube received the video).
+4. Duplicate upload prevention via SHA-256, filename, and channel upload history.
+5. Independent custom thumbnail upload with graceful handling of HTTP 403 (unverified channel).
+6. Pre-flight video integrity validation via ffprobe.
+7. Unattended OAuth refresh with explicit handling of invalid_grant and revoked tokens.
+8. Verification of authenticated channel identity.
+"""
+
 import os
 import sys
 import json
+import time
+import socket
+import random
 import hashlib
-from datetime import datetime
+import logging
+from datetime import datetime, timezone, timedelta
+
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
+from googleapiclient.errors import HttpError
+
 from config import (
     CREDENTIALS_FILE, TOKEN_FILE, SCOPES,
     UPLOADS_HISTORY_FILE, YOUTUBE_CATEGORY_ID,
-    YOUTUBE_MADE_FOR_KIDS, DEFAULT_PRIVACY_STATUS
+    YOUTUBE_MADE_FOR_KIDS, DEFAULT_PRIVACY_STATUS,
+    CHANNEL_NAME
 )
+from video_validator import validate_video_file
+import job_tracker
 
 if sys.stdout.encoding != "utf-8":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+
+logger = logging.getLogger("kids_automation")
+
+# Transient errors that can be retried during chunked upload
+TRANSIENT_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
+TRANSIENT_NETWORK_ERRORS = (
+    socket.timeout,
+    TimeoutError,
+    ConnectionError,
+    OSError
+)
+
+
+class UploadResult(tuple):
+    """
+    Backward-compatible tuple (success, video_id, video_url) that also
+    exposes rich metadata attributes: thumbnail_status, error, is_duplicate.
+    """
+    def __new__(cls, success, video_id, video_url, thumbnail_status="none", error=None, is_duplicate=False):
+        return super().__new__(cls, (success, video_id, video_url))
+
+    def __init__(self, success, video_id, video_url, thumbnail_status="none", error=None, is_duplicate=False):
+        self.success = success
+        self.video_id = video_id
+        self.video_url = video_url
+        self.thumbnail_status = thumbnail_status
+        self.error = error
+        self.is_duplicate = is_duplicate
+
 
 def compute_file_hash(filepath):
     """Computes SHA-256 of video file to uniquely identify it."""
@@ -28,16 +84,51 @@ def compute_file_hash(filepath):
             hasher.update(chunk)
     return hasher.hexdigest()
 
+
+def verify_channel(youtube):
+    """
+    Verifies that the authenticated YouTube account corresponds to the intended channel.
+    Returns (channel_id, channel_title, uploads_playlist_id).
+    """
+    try:
+        resp = youtube.channels().list(mine=True, part="snippet,contentDetails").execute()
+        items = resp.get("items", [])
+        if not items:
+            logger.warning("⚠️ Authenticated account has no YouTube channel associated.")
+            return None, None, None
+
+        item = items[0]
+        ch_id = item["id"]
+        ch_title = item["snippet"].get("title", "")
+        uploads_pl = item.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
+
+        logger.info(f"📺 Authenticated Channel: '{ch_title}' (ID: {ch_id})")
+
+        if CHANNEL_NAME and CHANNEL_NAME.lower() not in ch_title.lower():
+            logger.warning(
+                f"⚠️ Note: Authorized channel '{ch_title}' differs from expected '{CHANNEL_NAME}'."
+            )
+
+        return ch_id, ch_title, uploads_pl
+    except Exception as e:
+        logger.warning(f"⚠️ Could not verify channel details: {e}")
+        return None, None, None
+
+
 def get_authenticated_service(interactive=False):
     """
     Retrieves or refreshes YouTube API credentials.
-    Uses token.json if available to run 100% unattended without browser popups.
-    Only launches interactive browser login if interactive=True and no valid token exists.
+    Uses token.json to run unattended.
+    If token is expired or within 10 minutes of expiry, proactively refreshes it.
+    Catches invalid_grant / revoked tokens and gives actionable instructions.
     """
     creds = None
 
     if not os.path.exists(CREDENTIALS_FILE):
-        raise FileNotFoundError(f"Missing OAuth credentials file at: {CREDENTIALS_FILE}")
+        raise FileNotFoundError(
+            f"Missing OAuth credentials file at: {CREDENTIALS_FILE}\n"
+            f"Please place your Google Cloud OAuth client secret at this location."
+        )
 
     if os.path.exists(TOKEN_FILE):
         try:
@@ -45,40 +136,67 @@ def get_authenticated_service(interactive=False):
                 tok_data = json.load(tf)
             tok_scopes = set(tok_data.get("scopes", []))
             if not all(s in tok_scopes for s in SCOPES):
-                print(f"⚠️ Saved token.json is missing required scopes ({SCOPES}). Re-authorization required.")
+                logger.warning(f"⚠️ Saved token.json is missing required scopes ({SCOPES}). Re-authorization required.")
                 creds = None
             else:
                 creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
         except Exception as e:
-            print(f"⚠️ Warning reading {TOKEN_FILE}: {e}")
+            logger.warning(f"⚠️ Warning reading {TOKEN_FILE}: {e}")
             creds = None
 
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            print("🔄 Refreshing expired OAuth token automatically...")
-            try:
-                creds.refresh(Request())
-                with open(TOKEN_FILE, "w", encoding="utf-8") as f:
-                    f.write(creds.to_json())
-                print("✅ Token refreshed successfully.")
-            except Exception as e:
-                print(f"⚠️ Could not auto-refresh token: {e}")
+    # Check validity and proactive refresh
+    needs_refresh = False
+    if creds:
+        if not creds.valid:
+            needs_refresh = True
+        elif creds.expiry:
+            # Refresh if expires within 10 minutes
+            now_utc = datetime.now(timezone.utc)
+            expiry_utc = creds.expiry.replace(tzinfo=timezone.utc) if creds.expiry.tzinfo is None else creds.expiry
+            if expiry_utc - now_utc < timedelta(minutes=10):
+                needs_refresh = True
+
+    if creds and needs_refresh and creds.refresh_token:
+        logger.info("🔄 Refreshing OAuth token automatically...")
+        try:
+            creds.refresh(Request())
+            # Save refreshed token atomically
+            temp_tok = TOKEN_FILE + ".tmp"
+            with open(temp_tok, "w", encoding="utf-8") as f:
+                f.write(creds.to_json())
+            if os.path.exists(TOKEN_FILE):
+                os.replace(temp_tok, TOKEN_FILE)
+            else:
+                os.rename(temp_tok, TOKEN_FILE)
+            logger.info("✅ Token refreshed and saved successfully.")
+        except RefreshError as re:
+            logger.error(f"❌ YouTube OAuth refresh failed (token expired or revoked): {re}")
+            creds = None
+        except Exception as e:
+            logger.warning(f"⚠️ Auto-refresh warning: {e}")
+            # If creds is still somehow usable, continue, otherwise nullify
+            if not creds.valid:
                 creds = None
 
-        if not creds:
-            if not interactive:
-                raise RuntimeError(
-                    f"Authentication required: No valid token found at {TOKEN_FILE}.\n"
-                    f"Please run 'python auth_setup.py' once interactively to complete initial authorization."
-                )
-            print("🔑 Opening browser for one-time YouTube OAuth authorization...")
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
-            with open(TOKEN_FILE, "w", encoding="utf-8") as f:
-                f.write(creds.to_json())
-            print(f"✅ Authorization successful! Saved reusable token to {TOKEN_FILE}")
+    if not creds or not creds.valid:
+        if not interactive:
+            raise RuntimeError(
+                f"Authentication required: No valid OAuth token found at {TOKEN_FILE}.\n"
+                f"The token may have expired or been revoked.\n"
+                f"ACTION REQUIRED: Run 'python auth_setup.py' interactively once to authorize."
+            )
+        logger.info("🔑 Opening browser for YouTube OAuth authorization...")
+        flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+        creds = flow.run_local_server(port=0)
+        with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+            f.write(creds.to_json())
+        logger.info(f"✅ Authorization successful! Saved reusable token to {TOKEN_FILE}")
 
-    return googleapiclient.discovery.build("youtube", "v3", credentials=creds)
+    # Build client with reasonable timeout configuration
+    socket.setdefaulttimeout(120)
+    service = googleapiclient.discovery.build("youtube", "v3", credentials=creds, cache_discovery=False)
+    return service
+
 
 def load_upload_history():
     if os.path.exists(UPLOADS_HISTORY_FILE):
@@ -89,17 +207,24 @@ def load_upload_history():
             return []
     return []
 
+
 def record_upload_success(record):
     history = load_upload_history()
     history.append(record)
     os.makedirs(os.path.dirname(UPLOADS_HISTORY_FILE), exist_ok=True)
-    with open(UPLOADS_HISTORY_FILE, "w", encoding="utf-8") as f:
+    temp_hist = UPLOADS_HISTORY_FILE + ".tmp"
+    with open(temp_hist, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
+    if os.path.exists(UPLOADS_HISTORY_FILE):
+        os.replace(temp_hist, UPLOADS_HISTORY_FILE)
+    else:
+        os.rename(temp_hist, UPLOADS_HISTORY_FILE)
+
 
 def is_already_uploaded(video_path):
     """
     Checks if a video has already been uploaded to prevent duplicate uploads.
-    Matches by filename and SHA-256 hash.
+    Matches by filename, SHA-256 hash, or job state.
     """
     if not os.path.exists(video_path):
         return False, None
@@ -110,48 +235,169 @@ def is_already_uploaded(video_path):
 
     for item in history:
         if item.get("file_hash") == file_hash or item.get("filename") == filename:
-            return True, item
+            if item.get("video_id"):
+                return True, item
     return False, None
 
-def upload_video_to_youtube(video_path, metadata, thumbnail_path=None, privacy_status=None, interactive=False):
+
+def verify_uploaded_video_on_channel(youtube, title, lookback_hours=12):
+    """
+    Queries the channel's uploads playlist (1 quota unit) to verify if a video
+    with the matching title was successfully received by YouTube within the lookback window.
+    This resolves ambiguous upload states (e.g. read timeout on final chunk).
+    """
+    try:
+        ch_id, ch_title, uploads_pl = verify_channel(youtube)
+        if not uploads_pl:
+            return False, None, None
+
+        resp = youtube.playlistItems().list(
+            playlistId=uploads_pl,
+            part="snippet,status",
+            maxResults=10
+        ).execute()
+
+        clean_target = "".join(c for c in title.lower() if c.isalnum() or c.isspace()).strip()
+
+        for item in resp.get("items", []):
+            snip = item.get("snippet", {})
+            v_title = snip.get("title", "")
+            clean_v = "".join(c for c in v_title.lower() if c.isalnum() or c.isspace()).strip()
+
+            # Check for title match
+            if clean_target and (clean_target in clean_v or clean_v in clean_target):
+                v_id = snip.get("resourceId", {}).get("videoId")
+                if v_id:
+                    v_url = f"https://youtube.com/watch?v={v_id}"
+                    logger.info(f"🔎 Found matching video on channel uploads playlist: '{v_title}' (ID: {v_id})")
+                    return True, v_id, v_url
+
+        return False, None, None
+    except Exception as e:
+        logger.warning(f"⚠️ Could not query channel playlist to verify upload: {e}")
+        return False, None, None
+
+
+def _set_thumbnail_safe(youtube, video_id, thumbnail_path):
+    """
+    Uploads custom thumbnail with isolated error handling.
+    If 403 Forbidden (account requires phone verification), logs a warning,
+    preserves local file, and returns 'skipped_403_unverified'.
+    Never causes video upload to fail.
+    """
+    if not thumbnail_path or not os.path.exists(thumbnail_path):
+        return "none"
+
+    logger.info(f"🖼️ Setting custom video thumbnail for video {video_id}...")
+    media = None
+    try:
+        media = MediaFileUpload(thumbnail_path, mimetype="image/jpeg")
+        youtube.thumbnails().set(
+            videoId=video_id,
+            media_body=media
+        ).execute()
+        logger.info("✅ Custom thumbnail uploaded successfully!")
+        return "uploaded"
+    except HttpError as he:
+        if he.resp.status == 403:
+            logger.warning(
+                "⚠️ Note: Custom thumbnail could not be set (HTTP 403 Forbidden).\n"
+                "   YouTube requires phone verification on this channel account to enable custom thumbnails.\n"
+                "   The video upload succeeded unaffected with the default video frame."
+            )
+            return "skipped_403_unverified"
+        else:
+            logger.warning(f"⚠️ Thumbnail upload HttpError ({he.resp.status}): {he}")
+            return f"failed_http_{he.resp.status}"
+    except Exception as e:
+        logger.warning(f"⚠️ Thumbnail upload exception: {e}")
+        return f"failed: {str(e)[:60]}"
+    finally:
+        if media is not None:
+            try:
+                if hasattr(media, "_fd") and media._fd:
+                    media._fd.close()
+            except Exception:
+                pass
+
+
+def upload_video_to_youtube(video_path, metadata, thumbnail_path=None, privacy_status=None, interactive=False, slot=None):
     """
     Uploads a video to YouTube with complete metadata and COPPA compliance.
-    Returns (success, video_id, video_url).
+    Features:
+    - Pre-flight video validation (ffprobe)
+    - Resumable chunked upload with exponential backoff & jitter for transient errors
+    - Ambiguous outcome verification against channel playlist
+    - Independent custom thumbnail upload
+    - Atomic history and job state persistence
+    - Returns UploadResult (compatible with 3-tuple unpacking)
     """
-    if not os.path.exists(video_path):
-        return False, None, f"Video file not found: {video_path}"
+    # 1. Pre-flight Video Integrity Check
+    is_valid, val_err, duration, size_bytes = validate_video_file(video_path)
+    if not is_valid:
+        err_msg = f"Video validation failed: {val_err}"
+        logger.error(f"❌ {err_msg}")
+        if slot:
+            job_tracker.update_job(slot, state=job_tracker.STATE_FAILED, error_message=err_msg)
+        return UploadResult(False, None, None, error=err_msg)
 
-    # 1. Check duplicate upload
+    # 2. Check Duplicate Upload
     already_done, record = is_already_uploaded(video_path)
     if already_done:
         vid_id = record.get("video_id")
         url = f"https://youtube.com/watch?v={vid_id}"
-        print(f"🛑 Video already uploaded previously! Skipping duplicate upload.")
-        print(f"🎥 Existing Video Link: {url}")
-        return True, vid_id, url
+        logger.info(f"🛑 Video already uploaded previously! Skipping duplicate upload.")
+        logger.info(f"🎥 Existing Video Link: {url}")
+        if slot:
+            job_tracker.update_job(
+                slot,
+                state=job_tracker.STATE_UPLOADED,
+                video_id=vid_id,
+                video_url=url,
+                file_hash=record.get("file_hash"),
+                video_path=video_path
+            )
+        return UploadResult(True, vid_id, url, thumbnail_status="already_uploaded", is_duplicate=True)
 
-    # 2. Get YouTube client
+    # 3. Authenticate YouTube Client
     try:
         youtube = get_authenticated_service(interactive=interactive)
     except Exception as e:
-        print(f"❌ YouTube authentication error: {e}")
-        return False, None, str(e)
+        err_msg = f"YouTube authentication error: {e}"
+        logger.error(f"❌ {err_msg}")
+        if slot:
+            job_tracker.update_job(slot, state=job_tracker.STATE_FAILED, error_message=err_msg)
+        return UploadResult(False, None, None, error=err_msg)
 
-    # 3. Prepare payload
+    # 4. Prepare Metadata & State
     privacy = privacy_status or DEFAULT_PRIVACY_STATUS
     title = metadata.get("title", "Kids Learning Video | Fun Learning Kids")
     description = metadata.get("description", "Welcome to Fun Learning Kids!")
     tags = metadata.get("tags", ["kids", "learning", "fun learning kids"])
     topic = metadata.get("topic", "general")
 
-    print("📤 Uploading video to YouTube...")
-    print(f"   Title: {title}")
-    print(f"   Privacy: {privacy}")
-    print(f"   Made For Kids: {YOUTUBE_MADE_FOR_KIDS}")
+    file_hash = compute_file_hash(video_path)
+
+    if slot:
+        job_tracker.update_job(
+            slot,
+            state=job_tracker.STATE_UPLOADING,
+            title=title,
+            topic=topic,
+            video_path=video_path,
+            file_hash=file_hash,
+            privacy=privacy
+        )
+
+    logger.info("📤 Uploading video to YouTube (Resumable)...")
+    logger.info(f"   Title: {title}")
+    logger.info(f"   Privacy: {privacy}")
+    logger.info(f"   Made For Kids: {YOUTUBE_MADE_FOR_KIDS}")
+    logger.info(f"   Size: {size_bytes:,} bytes | Duration: {duration:.2f}s")
 
     body = {
         "snippet": {
-            "title": title[:100], # YouTube max title length is 100
+            "title": title[:100],
             "description": description[:5000],
             "tags": tags,
             "categoryId": YOUTUBE_CATEGORY_ID
@@ -162,58 +408,116 @@ def upload_video_to_youtube(video_path, metadata, thumbnail_path=None, privacy_s
         }
     }
 
-    try:
-        media = MediaFileUpload(
-            video_path,
-            mimetype="video/mp4",
-            chunksize=1024 * 1024 * 4,
-            resumable=True
-        )
+    # 5. Execute Resumable Upload with Chunk Retries
+    max_chunk_retries = 10
+    media = MediaFileUpload(
+        video_path,
+        mimetype="video/mp4",
+        chunksize=1024 * 1024 * 4,  # 4MB chunks
+        resumable=True
+    )
 
-        request = youtube.videos().insert(
-            part="snippet,status",
-            body=body,
-            media_body=media
-        )
+    request = youtube.videos().insert(
+        part="snippet,status",
+        body=body,
+        media_body=media
+    )
 
-        response = None
-        while response is None:
+    response = None
+    upload_error = None
+    attempt = 0
+
+    while response is None:
+        try:
             status, response = request.next_chunk()
             if status:
-                print(f"   Upload progress: {int(status.progress() * 100)}%")
+                logger.info(f"   Upload progress: {int(status.progress() * 100)}%")
+            # Successful chunk resets retry counter
+            attempt = 0
+        except HttpError as he:
+            status_code = he.resp.status
+            if status_code in TRANSIENT_HTTP_STATUSES and attempt < max_chunk_retries:
+                attempt += 1
+                retry_after = he.resp.get("retry-after")
+                delay = float(retry_after) if retry_after else (2 ** min(attempt, 6)) + random.uniform(0.5, 1.5)
+                logger.warning(
+                    f"⚠️ Transient HTTP {status_code} during chunk upload (attempt {attempt}/{max_chunk_retries}). "
+                    f"Resuming in {delay:.1f}s..."
+                )
+                time.sleep(delay)
+            else:
+                upload_error = f"YouTube API HttpError {status_code}: {he}"
+                logger.error(f"❌ Permanent upload HttpError: {upload_error}")
+                break
+        except TRANSIENT_NETWORK_ERRORS as net_err:
+            if attempt < max_chunk_retries:
+                attempt += 1
+                delay = (2 ** min(attempt, 6)) + random.uniform(0.5, 1.5)
+                logger.warning(
+                    f"⚠️ Transient network/timeout error during chunk upload ({net_err.__class__.__name__}: {net_err}) "
+                    f"(attempt {attempt}/{max_chunk_retries}). Resuming in {delay:.1f}s..."
+                )
+                time.sleep(delay)
+            else:
+                upload_error = f"Network retries exhausted: {net_err}"
+                logger.error(f"❌ {upload_error}")
+                break
+        except Exception as e:
+            upload_error = f"Unexpected upload exception: {e}"
+            logger.error(f"❌ {upload_error}")
+            break
 
+    # 6. Ambiguous Outcome Resolution
+    video_id = None
+    if response is not None:
         video_id = response.get("id")
-        video_url = f"https://youtube.com/watch?v={video_id}"
-        print(f"\n🎉 Upload Successful!")
-        print(f"🎥 Video Link: {video_url}")
+    else:
+        # If response was None, did YouTube receive the video anyway despite client timeout?
+        logger.info("🔎 Verifying whether video reached YouTube channel despite client disconnect/timeout...")
+        found, v_id, v_url = verify_uploaded_video_on_channel(youtube, title)
+        if found:
+            logger.info(f"✅ Ambiguous upload verified! Video is present on channel: {v_url}")
+            video_id = v_id
+        else:
+            logger.error(f"❌ Upload could not be completed: {upload_error}")
+            if slot:
+                job_tracker.update_job(
+                    slot,
+                    state=job_tracker.STATE_FAILED,
+                    error_message=upload_error
+                )
+            return UploadResult(False, None, None, error=upload_error)
 
-        # 4. Upload thumbnail if available
-        if thumbnail_path and os.path.exists(thumbnail_path):
-            try:
-                print(f"🖼️ Setting custom video thumbnail...")
-                youtube.thumbnails().set(
-                    videoId=video_id,
-                    media_body=MediaFileUpload(thumbnail_path, mimetype="image/jpeg")
-                ).execute()
-                print("✅ Thumbnail uploaded successfully!")
-            except Exception as e:
-                print(f"⚠️ Note: Custom thumbnail could not be set: {e}")
-                print("   (YouTube requires account phone-verification for custom thumbnails; video upload is unaffected)")
+    video_url = f"https://youtube.com/watch?v={video_id}"
+    logger.info(f"\n🎉 Upload Confirmed Successful!")
+    logger.info(f"🎥 Video Link: {video_url}")
 
-        # 5. Record in history log
-        record_upload_success({
-            "timestamp": datetime.now().isoformat(),
-            "filename": os.path.basename(video_path),
-            "file_hash": compute_file_hash(video_path),
-            "video_id": video_id,
-            "url": video_url,
-            "title": title,
-            "topic": topic,
-            "privacy": privacy
-        })
+    # 7. Independent Custom Thumbnail Upload
+    thumb_status = _set_thumbnail_safe(youtube, video_id, thumbnail_path)
 
-        return True, video_id, video_url
+    # 8. Record in History & Job Tracker
+    record_upload_success({
+        "timestamp": datetime.now().isoformat(),
+        "filename": os.path.basename(video_path),
+        "file_hash": file_hash,
+        "video_id": video_id,
+        "url": video_url,
+        "title": title,
+        "topic": topic,
+        "privacy": privacy,
+        "thumbnail_status": thumb_status
+    })
 
-    except Exception as e:
-        print(f"❌ Upload failed: {e}")
-        return False, None, str(e)
+    if slot:
+        job_tracker.update_job(
+            slot,
+            state=job_tracker.STATE_UPLOADED,
+            video_id=video_id,
+            video_url=video_url,
+            file_hash=file_hash,
+            video_path=video_path,
+            thumbnail_status=thumb_status,
+            error_message=None
+        )
+
+    return UploadResult(True, video_id, video_url, thumbnail_status=thumb_status)

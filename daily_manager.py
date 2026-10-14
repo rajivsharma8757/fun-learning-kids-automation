@@ -1,3 +1,21 @@
+"""
+daily_manager.py
+----------------
+Master Orchestrator for Fun Learning Kids Automation (Daily Target: 3 Videos).
+
+Video Target:
+1. Normal Video 1 (Morning slot: Educational / Story)
+2. Normal Video 2 (Evening slot: Educational / Story)
+3. Cartoon Video 3 (Cartoon Animation slot: Alternating V1 Vector / V4 Parallax)
+
+Key Guarantees:
+- Windows process lock prevents duplicate overlapping runs (e.g. logon trigger + schedule).
+- Failure Isolation: A failure in any video NEVER blocks the remaining videos.
+- Idempotency & Resumption: Only uncompleted slots are generated/uploaded.
+- Persistent state tracking via job_tracker.py and history/uploads.json.
+- Structured, truthful end-of-run daily summary.
+"""
+
 import os
 import sys
 import time
@@ -12,6 +30,7 @@ from config import (
     LAST_RUN_FILE, DEFAULT_PRIVACY_STATUS
 )
 from notifier import send_notification
+import job_tracker
 
 if sys.stdout.encoding != "utf-8":
     try:
@@ -20,6 +39,16 @@ if sys.stdout.encoding != "utf-8":
         pass
 
 logger = logging.getLogger("kids_automation")
+if not logger.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(LOG_FILE, encoding="utf-8"),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+
 
 def is_internet_connected(timeout=4):
     """
@@ -39,7 +68,8 @@ def is_internet_connected(timeout=4):
     except Exception:
         return False
 
-def wait_for_internet(max_wait_seconds=120, check_interval=5):
+
+def wait_for_internet(max_wait_seconds=90, check_interval=5):
     """
     Waits for internet connectivity when laptop boots up.
     Gives Wi-Fi / Ethernet time to establish connection.
@@ -59,10 +89,9 @@ def wait_for_internet(max_wait_seconds=120, check_interval=5):
     logger.warning("❌ Internet connection could not be established.")
     return False
 
+
 def get_today_uploads(today_str=None):
-    """
-    Returns list of upload records for today from history/uploads.json.
-    """
+    """Returns list of upload records for today from history/uploads.json."""
     if today_str is None:
         today_str = datetime.now().strftime("%Y-%m-%d")
 
@@ -79,19 +108,20 @@ def get_today_uploads(today_str=None):
     today_records = []
     for item in records:
         ts = item.get("timestamp", "")
-        # Checks if timestamp starts with YYYY-MM-DD and has a valid video_id
         if ts.startswith(today_str) and item.get("video_id"):
             today_records.append(item)
 
     return today_records
 
+
 def get_today_normal_uploads(today_str=None):
-    """Returns list of normal video records (topics: moral_story, numbers, etc.) uploaded today."""
+    """Returns list of normal educational videos uploaded today."""
     today_uploads = get_today_uploads(today_str)
     return [u for u in today_uploads if u.get("topic") != "cartoon_animation"]
 
+
 def get_today_cartoon_uploads(today_str=None):
-    """Returns list of cartoon video records uploaded today."""
+    """Returns list of cartoon animation videos uploaded today."""
     today_uploads = get_today_uploads(today_str)
     cart = [u for u in today_uploads if u.get("topic") == "cartoon_animation"]
     if cart:
@@ -104,166 +134,208 @@ def get_today_cartoon_uploads(today_str=None):
         ch = engine.load_history()
         if today_str is None:
             today_str = datetime.now().strftime("%Y-%m-%d")
-        return [h for h in ch if h.get("timestamp", "").startswith(today_str) and h.get("status") in ("uploaded", "completed") and h.get("video_id")]
+        return [
+            h for h in ch
+            if h.get("timestamp", "").startswith(today_str)
+            and h.get("status") in ("uploaded", "completed")
+            and h.get("video_id")
+        ]
     except Exception:
         return []
 
-def is_cartoon_pending(today_str=None):
-    """Checks if today's cartoon animation video (Video 3) is pending."""
-    return len(get_today_cartoon_uploads(today_str)) == 0
-
-def get_pending_slots(today_str=None):
-    """
-    Calculates which normal video slots are pending for today.
-    Normal daily target = 2 videos.
-    - If 0 normal uploaded: ['morning', 'evening'] (Video 1 and Video 2)
-    - If 1 normal uploaded: ['evening'] (Video 2)
-    - If 2+ normal uploaded: [] (Complete)
-    """
-    normal_uploads = get_today_normal_uploads(today_str)
-    count = len(normal_uploads)
-
-    if count == 0:
-        return ["morning", "evening"]
-    elif count == 1:
-        return ["evening"]
-    else:
-        return []
 
 def run_daily_automation(privacy_status=None, force=False, dry_run=False):
     """
     Master daily automation runner for Fun Learning Kids (Target: 3 Videos/Day):
     - Video 1: Normal Educational Video (Morning slot)
     - Video 2: Normal Educational Video (Evening slot)
-    - Video 3: Cartoon Animation Video (Style A: V4 / Style B: V1 rotation)
-    With complete failure isolation: failures in any video never block remaining videos.
+    - Video 3: Cartoon Animation Video (Alternating V1 / V4 styles)
+
+    Features:
+    - Concurrency process lock prevents multiple simultaneous executions.
+    - Full failure isolation: one video failure never cancels remaining videos.
+    - Detailed per-slot structured tracking and end-of-run audit report.
     """
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    logger.info("==================================================")
-    logger.info(f"🚀 Fun Learning Kids Daily Manager Started: {today_str} (Target: 3 Videos/Day)")
-    logger.info(f"   Dry Run: {dry_run} | Force: {force} | Privacy: {privacy_status or DEFAULT_PRIVACY_STATUS}")
-    logger.info("==================================================")
-
-    # 1. Check Internet Connectivity
-    if not wait_for_internet(max_wait_seconds=90, check_interval=5):
-        msg = "Internet connection is unavailable. Automation will retry automatically on next check."
-        logger.error(f"❌ {msg}")
-        send_notification("Fun Learning Kids — Alert", msg, error=True)
-        return False
-
-    # 2. Check Today's Status
-    normal_uploads = get_today_normal_uploads(today_str)
-    cartoon_uploads = get_today_cartoon_uploads(today_str)
-    normal_count = len(normal_uploads)
-    cartoon_count = len(cartoon_uploads)
-    total_count = normal_count + cartoon_count
-
-    logger.info(f"📊 Today's Progress ({today_str}): {total_count}/3 videos completed.")
-    logger.info(f"   - Normal Videos: {normal_count}/2 | Cartoon Video: {cartoon_count}/1")
-
-    pending_normal_slots = get_pending_slots(today_str)
-    cartoon_pending = is_cartoon_pending(today_str)
-
-    if not pending_normal_slots and not cartoon_pending and not force:
-        logger.info("🎉 Today's daily target of 3 videos is ALREADY COMPLETED!")
-        logger.info("   (2 Normal Videos + 1 Cartoon Video). Laptop is free for other work.")
+    # 0. Acquire Concurrency Lock
+    if not job_tracker.acquire_process_lock():
+        logger.info(
+            "⏳ Another instance of Fun Learning Kids automation is currently running.\n"
+            "   Exiting cleanly to prevent duplicate runs and conflicting uploads."
+        )
         return True
 
-    if force:
-        if not pending_normal_slots:
-            pending_normal_slots = ["evening"]
-        cartoon_pending = True
+    try:
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        target_privacy = privacy_status or DEFAULT_PRIVACY_STATUS
 
-    logger.info(f"🎯 Pending Normal Video Slots: {pending_normal_slots} | Cartoon Pending: {cartoon_pending}")
+        logger.info("==================================================")
+        logger.info(f"🚀 Fun Learning Kids Daily Manager Started: {today_str} (Target: 3 Videos/Day)")
+        logger.info(f"   Dry Run: {dry_run} | Force: {force} | Privacy: {target_privacy}")
+        logger.info("==================================================")
 
-    from run import run_pipeline
-    from cartoon.cartoon_daily_runner import run_daily_cartoon
+        # 1. Verify Internet Connectivity
+        if not wait_for_internet(max_wait_seconds=90, check_interval=5):
+            msg = "Internet connection is unavailable. Automation will retry automatically on next scheduled trigger."
+            logger.error(f"❌ {msg}")
+            send_notification("Fun Learning Kids — Alert", msg, error=True)
+            return False
 
-    target_privacy = privacy_status or DEFAULT_PRIVACY_STATUS
+        # 2. Check Existing Progress for Today
+        normal_uploads = get_today_normal_uploads(today_str)
+        cartoon_uploads = get_today_cartoon_uploads(today_str)
 
-    # Step A: Execute Pending Normal Slots (Videos 1 & 2)
-    for slot in pending_normal_slots:
-        video_num = 1 if slot == "morning" else 2
-        logger.info(f"\n▶️ Processing Today's Normal Video {video_num} (Slot: {slot})...")
+        norm_count = len(normal_uploads)
+        cart_count = len(cartoon_uploads)
+        total_count = norm_count + cart_count
 
-        try:
-            success = run_pipeline(
-                slot=slot,
-                privacy_status=target_privacy,
-                dry_run=dry_run,
-                force=True  # Force since slot logic was verified by daily manager
-            )
+        logger.info(f"📊 Current Today Progress ({today_str}): {total_count}/3 videos confirmed on YouTube.")
+        logger.info(f"   - Normal Videos: {norm_count}/2 | Cartoon Video: {cart_count}/1")
 
-            if success:
-                action_type = "created (dry-run)" if dry_run else "created and uploaded"
-                success_msg = f"Normal Video {video_num} {action_type} successfully!"
-                logger.info(f"✅ {success_msg}")
-                if not dry_run:
-                    send_notification(
-                        "Fun Learning Kids",
-                        f"Normal Video {video_num} uploaded successfully to YouTube."
-                    )
-            else:
-                fail_msg = f"Normal Video {video_num} failed during generation/upload. Check logs."
-                logger.error(f"❌ {fail_msg}")
-                send_notification(
-                    "Fun Learning Kids — Error",
-                    fail_msg,
-                    error=True
+        # Determine which slots need execution
+        # Normal Slot 1 ('morning')
+        morning_done = job_tracker.is_slot_completed("morning", today_str) or (norm_count >= 1)
+        # Normal Slot 2 ('evening')
+        evening_done = job_tracker.is_slot_completed("evening", today_str) or (norm_count >= 2)
+        # Cartoon Slot 3 ('cartoon')
+        cartoon_done = job_tracker.is_slot_completed("cartoon", today_str) or (cart_count >= 1)
+
+        if not force and morning_done and evening_done and cartoon_done:
+            logger.info("🎉 Today's daily target of 3 videos is ALREADY COMPLETED!")
+            logger.info("   (2 Normal Educational Videos + 1 Cartoon Video). System is idle.")
+            return True
+
+        from run import run_pipeline
+        from cartoon.cartoon_daily_runner import run_daily_cartoon
+
+        # Step A: Normal Video 1 (Morning Slot)
+        if not morning_done or force:
+            logger.info("\n▶️ Processing Today's Normal Video 1 (Slot: morning)...")
+            try:
+                m_ok = run_pipeline(
+                    slot="morning",
+                    privacy_status=target_privacy,
+                    dry_run=dry_run,
+                    force=force
                 )
-        except Exception as e:
-            err_msg = f"Normal Video {video_num} encountered exception: {e}"
-            logger.error(f"❌ {err_msg}")
-            send_notification(
-                "Fun Learning Kids — Exception",
-                f"Normal Video {video_num} failed: {str(e)[:100]}",
-                error=True
-            )
+                if m_ok:
+                    action = "verified (dry-run)" if dry_run else "uploaded"
+                    logger.info(f"✅ Normal Video 1 {action} successfully!")
+                else:
+                    logger.error("❌ Normal Video 1 failed during generation/upload. Continuing to remaining jobs.")
+            except Exception as e:
+                logger.error(f"❌ Normal Video 1 encountered isolated exception: {e}", exc_info=True)
+        else:
+            logger.info("⏩ Normal Video 1 (morning slot) already completed today. Skipping.")
 
-    # Step B: Execute Pending Cartoon Slot (Video 3) with Full Failure Isolation
-    if cartoon_pending:
-        logger.info("\n▶️ Processing Today's Cartoon Animation Video (Video 3)...")
-        try:
-            c_success = run_daily_cartoon(
-                dry_run=dry_run,
-                privacy_status=target_privacy,
-                force=force
-            )
-            if c_success:
-                action_type = "created and verified (dry-run)" if dry_run else "created and uploaded"
-                logger.info(f"✅ Cartoon Video 3 {action_type} successfully!")
+        # Step B: Normal Video 2 (Evening Slot)
+        if not evening_done or force:
+            logger.info("\n▶️ Processing Today's Normal Video 2 (Slot: evening)...")
+            try:
+                e_ok = run_pipeline(
+                    slot="evening",
+                    privacy_status=target_privacy,
+                    dry_run=dry_run,
+                    force=force
+                )
+                if e_ok:
+                    action = "verified (dry-run)" if dry_run else "uploaded"
+                    logger.info(f"✅ Normal Video 2 {action} successfully!")
+                else:
+                    logger.error("❌ Normal Video 2 failed during generation/upload. Continuing to remaining jobs.")
+            except Exception as e:
+                logger.error(f"❌ Normal Video 2 encountered isolated exception: {e}", exc_info=True)
+        else:
+            logger.info("⏩ Normal Video 2 (evening slot) already completed today. Skipping.")
+
+        # Step C: Cartoon Video 3 (Cartoon Slot) - Complete Failure Isolation
+        if not cartoon_done or force:
+            logger.info("\n▶️ Processing Today's Cartoon Animation Video (Video 3)...")
+            try:
+                c_ok = run_daily_cartoon(
+                    dry_run=dry_run,
+                    privacy_status=target_privacy,
+                    force=force
+                )
+                if c_ok:
+                    action = "verified (dry-run)" if dry_run else "uploaded"
+                    logger.info(f"✅ Cartoon Video 3 {action} successfully!")
+                else:
+                    logger.error("❌ Cartoon Video 3 failed. Inspect cartoon logs.")
+            except Exception as e:
+                logger.error(f"❌ Cartoon Video 3 encountered isolated exception: {e}", exc_info=True)
+        else:
+            logger.info("⏩ Cartoon Video 3 already completed today. Skipping.")
+
+        # Step D: Final Structured Daily Audit & Reporting
+        final_norm = len(get_today_normal_uploads(today_str))
+        final_cart = len(get_today_cartoon_uploads(today_str))
+        final_total = final_norm + final_cart
+
+        summary = job_tracker.get_daily_summary(today_str)
+
+        logger.info("\n" + "=" * 70)
+        logger.info(f"📋 FUN LEARNING KIDS — MASTER DAILY SUMMARY ({today_str})")
+        logger.info("=" * 70)
+
+        slots_display = [
+            ("Slot 1 (Normal Video 1 - morning)", "morning"),
+            ("Slot 2 (Normal Video 2 - evening)", "evening"),
+            ("Slot 3 (Cartoon Video 3 - cartoon)", "cartoon")
+        ]
+
+        for label, s_key in slots_display:
+            j = summary.get(s_key, {})
+            state = j.get("state", "pending").upper()
+            v_id = j.get("video_id") or "N/A"
+            v_url = j.get("video_url") or "N/A"
+            t_status = j.get("thumbnail_status") or "none"
+            err = j.get("error_message")
+
+            if state == "UPLOADED":
+                logger.info(f"  {label}:")
+                logger.info(f"     Status: UPLOADED | Video ID: {v_id}")
+                logger.info(f"     URL: {v_url}")
+                logger.info(f"     Thumbnail: {t_status}")
+            elif dry_run and state == "DRY_RUN_SUCCESS":
+                logger.info(f"  {label}:")
+                logger.info(f"     Status: DRY_RUN_SUCCESS (Local render & QA verified)")
+                logger.info(f"     File: {j.get('video_path')}")
+            elif state == "NEEDS_MANUAL_REVIEW":
+                logger.warning(f"  {label}:")
+                logger.warning(f"     Status: NEEDS VERIFICATION (Upload outcome ambiguous)")
+                logger.warning(f"     Details: {err or 'Timeout occurred on final upload response'}")
             else:
-                logger.error("❌ Cartoon Video 3 failed. Inspect cartoon logs.")
-        except Exception as e:
-            logger.error(f"❌ Cartoon Video 3 encountered an isolated exception: {e}", exc_info=True)
-            # Failure isolation: cartoon error never breaks the daily manager
+                logger.info(f"  {label}:")
+                logger.info(f"     Status: {state} | Error: {err or 'Pending or uncompleted'}")
 
-    # Step C: Final Daily Summary Verification
-    final_norm = len(get_today_normal_uploads(today_str))
-    final_cart = len(get_today_cartoon_uploads(today_str))
-    final_total = final_norm + final_cart
+        logger.info("-" * 70)
+        logger.info(f"🎯 Daily Result: {final_total}/3 confirmed uploads on YouTube.")
+        logger.info(f"   Normal Videos: {final_norm}/2 | Cartoon Video: {final_cart}/1")
+        logger.info("=" * 70)
 
-    logger.info("==================================================")
-    logger.info(f"📋 Daily Run Finished: {final_total}/3 videos completed today.")
-    logger.info(f"   Normal Videos: {final_norm}/2 | Cartoon Video: {final_cart}/1")
-    logger.info("==================================================")
+        all_completed = (final_total >= 3) or (dry_run and final_norm >= 2 and final_cart >= 1)
 
-    if final_total >= 3 or (dry_run and final_norm >= 2 and final_cart >= 1):
-        final_msg = "Today's 3 videos (2 Normal + 1 Cartoon) have been successfully completed! Today's work is complete."
-        logger.info(f"🎉🎉 {final_msg}")
-        if not dry_run:
-            send_notification("Fun Learning Kids", final_msg)
-        return True
-    else:
-        pending_rem = 3 - final_total
-        logger.warning(f"⚠️ {pending_rem} video(s) still pending for today. Will retry on next check.")
-        return False
+        if all_completed:
+            success_msg = f"All 3 daily videos for {today_str} have been successfully produced and uploaded!"
+            logger.info(f"🎉🎉 {success_msg}")
+            if not dry_run:
+                send_notification("Fun Learning Kids", success_msg)
+            return True
+        else:
+            pending_count = 3 - final_total
+            logger.warning(f"⚠️ {pending_count} video(s) still pending for today ({today_str}). Will resume on next trigger.")
+            return False
+
+    finally:
+        # Always release the process lock
+        job_tracker.release_process_lock()
+
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Fun Learning Kids Daily Manager (3 Videos/Day)")
     parser.add_argument("--privacy", default=None, choices=["public", "unlisted", "private"])
-    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--force", action="store_true", help="Force re-execution of all slots")
     parser.add_argument("--dry-run", action="store_true", help="Run full daily manager in dry-run mode without uploading")
     args = parser.parse_args()
 

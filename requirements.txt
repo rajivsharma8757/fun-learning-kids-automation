@@ -1,8 +1,8 @@
 # Fun Learning Kids - Core Python Dependencies
 # Tested and validated on Python 3.10, 3.11, and 3.12
 
-# Text-to-Speech Engine (Hindi Neural Voices)
-edge-tts>=7.0.0
+# Text-to-Speech Engine (Hindi Neural Voices - >=7.3.1 required for Microsoft websocket Sec-MS-GEC handshake fix)
+edge-tts>=7.3.1
 
 # Graphic Rendering, Rig Compositing, and Thumbnails
 Pillow>=10.0.0

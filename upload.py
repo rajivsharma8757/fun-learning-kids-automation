@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 from config import BASE_DIR, VIDEO_DIR, THUMBNAIL_DIR
 from uploader import get_authenticated_service, upload_video_to_youtube, is_already_uploaded
@@ -60,15 +60,17 @@ if __name__ == "__main__":
         "topic": topic
     }
 
-    success, vid_id, url = upload_video_to_youtube(
+    res = upload_video_to_youtube(
         video_path=target_video,
         metadata=metadata,
         thumbnail_path=thumb_path,
         interactive=True
     )
+    success, vid_id, url = res
 
     if success:
         print(f"\n🎉 Finished successfully! Video Link: {url}")
+        print(f"   Thumbnail Status: {res.thumbnail_status}")
     else:
-        print(f"\n❌ Upload failed: {url}")
+        print(f"\n❌ Upload failed: {res.error or 'Unknown upload error'}")
         sys.exit(1)

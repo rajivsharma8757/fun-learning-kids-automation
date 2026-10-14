@@ -13,6 +13,8 @@ from voice_generator import generate_voice
 from video_maker import generate_srt_file, create_video
 from thumbnail_maker import create_thumbnail
 from uploader import upload_video_to_youtube
+from video_validator import validate_video_file
+import job_tracker
 
 if sys.stdout.encoding != "utf-8":
     try:
@@ -45,7 +47,7 @@ def determine_current_slot(requested_slot=None):
     else:
         return "evening"
 
-def check_and_acquire_lock(slot_id, force=False):
+def check_and_acquire_lock(slot_id, slot_name=None, force=False):
     """
     Checks if this slot has already run today to support 2 videos per day
     without duplicate executions.
@@ -53,6 +55,11 @@ def check_and_acquire_lock(slot_id, force=False):
     if force:
         logger.info("⚡ Force flag enabled: bypassing slot lock.")
         return True
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    if slot_name and job_tracker.is_slot_completed(slot_name, today_str):
+        logger.info(f"⏳ Slot '{slot_name}' already confirmed UPLOADED today. Exiting safely.")
+        return False
 
     if os.path.exists(LAST_RUN_FILE):
         try:
@@ -90,8 +97,10 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
     logger.info(f"   Dry Run: {dry_run} | Privacy: {privacy_status} | Force: {force}")
     logger.info("==================================================")
 
-    if not check_and_acquire_lock(slot_id, force=force):
+    if not check_and_acquire_lock(slot_id, slot_name=current_slot, force=force):
         return True
+
+    job_tracker.update_job(current_slot, state=job_tracker.STATE_GENERATING)
 
     # 1. Select Topic, Script & Images
     cm = ContentManager()
@@ -99,6 +108,13 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
     script = cm.get_next_script(chosen_topic)
     topic_images = cm.get_topic_images(chosen_topic, count=1, script=script)
     primary_image = topic_images[0]
+
+    job_tracker.update_job(
+        current_slot,
+        topic=chosen_topic,
+        script_id=script["id"],
+        title=script["title"]
+    )
 
     logger.info(f"📌 Chosen Topic: {chosen_topic}")
     logger.info(f"📝 Script ID: {script['id']} | Title: {script['title']}")
@@ -114,6 +130,7 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
     ok_voice, audio_duration = generate_voice(script["voice_text"], audio_path)
     if not ok_voice:
         logger.error("❌ Pipeline stopped: Voice generation failed.")
+        job_tracker.update_job(current_slot, state=job_tracker.STATE_FAILED, error_message="Voice generation failed")
         return False
 
     # 3. Generate English Subtitles
@@ -134,6 +151,14 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
     )
     if not ok_video:
         logger.error(f"❌ Pipeline stopped: Video creation failed ({vid_err}).")
+        job_tracker.update_job(current_slot, state=job_tracker.STATE_FAILED, error_message=f"Video creation failed: {vid_err}")
+        return False
+
+    # Pre-upload integrity check
+    valid_vid, val_err, _, _ = validate_video_file(video_path)
+    if not valid_vid:
+        logger.error(f"❌ Pre-upload video validation failed: {val_err}")
+        job_tracker.update_job(current_slot, state=job_tracker.STATE_FAILED, error_message=val_err)
         return False
 
     # 5. Generate Thumbnail with Pillow
@@ -150,10 +175,18 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
     else:
         actual_thumb = thumb_path
 
+    job_tracker.update_job(
+        current_slot,
+        state=job_tracker.STATE_UPLOAD_PENDING,
+        video_path=video_path,
+        thumb_path=actual_thumb
+    )
+
     # 6. Upload to YouTube
     if dry_run:
         logger.info("🧪 [DRY-RUN] Skipping YouTube upload step as requested.")
         record_lock(slot_id)
+        job_tracker.update_job(current_slot, state="dry_run_success", video_path=video_path, thumb_path=actual_thumb)
         logger.info("🎉 [DRY-RUN] Pipeline completed successfully!")
         return True
 
@@ -169,12 +202,14 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
         metadata=upload_metadata,
         thumbnail_path=actual_thumb,
         privacy_status=privacy_status,
-        interactive=interactive
+        interactive=interactive,
+        slot=current_slot
     )
 
     if not ok_upload:
         logger.error(f"❌ Pipeline stopped: YouTube upload failed: {upload_res}")
         logger.error("   (Lock not saved so this run can be safely retried.)")
+        job_tracker.update_job(current_slot, state=job_tracker.STATE_FAILED, error_message=str(upload_res))
         return False
 
     # 7. Record Completion
