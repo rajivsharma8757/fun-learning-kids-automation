@@ -100,16 +100,38 @@ class TestAuditFixes(unittest.TestCase):
 
     def test_analytics_reporter_prerequisites_and_status(self):
         """Verify analytics reporter identifies missing scopes and disabled API without crashing."""
-        reporter = YouTubeAnalyticsReporter()
-        ok, msg = reporter.check_prerequisites()
-        self.assertFalse(ok)
-        self.assertIn("BLOCKED_SCOPE_PENDING", reporter.auth_status)
-        self.assertIn(REQUIRED_ANALYTICS_SCOPE, msg)
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json") as f:
+            f.write('{"scopes": ["https://www.googleapis.com/auth/youtube.upload"]}')
+            f.flush()
+            temp_token = f.name
+        try:
+            reporter = YouTubeAnalyticsReporter(token_file=temp_token)
+            ok, msg = reporter.check_prerequisites()
+            self.assertFalse(ok)
+            self.assertIn("BLOCKED_SCOPE_PENDING", reporter.auth_status)
+            self.assertIn(REQUIRED_ANALYTICS_SCOPE, msg)
 
-        # Verify query_channel_overview reports blocked status cleanly
-        res = reporter.query_channel_overview()
-        self.assertEqual(res["status"], "BLOCKED")
-        self.assertIn("console.developers.google.com", res["gcp_enable_url"])
+            # Verify query_channel_overview reports blocked status cleanly
+            res = reporter.query_channel_overview()
+            self.assertEqual(res["status"], "BLOCKED")
+            self.assertIn("console.developers.google.com", res["gcp_enable_url"])
+        finally:
+            if os.path.exists(temp_token):
+                os.remove(temp_token)
+
+        # Verify ready status with valid token
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json") as f:
+            f.write('{"scopes": ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/yt-analytics.readonly"]}')
+            f.flush()
+            temp_token2 = f.name
+        try:
+            reporter2 = YouTubeAnalyticsReporter(token_file=temp_token2)
+            ok2, msg2 = reporter2.check_prerequisites()
+            self.assertTrue(ok2)
+            self.assertEqual(reporter2.auth_status, "READY")
+        finally:
+            if os.path.exists(temp_token2):
+                os.remove(temp_token2)
 
     def test_analytics_baseline_report_structure(self):
         """Verify baseline report parses video dataset and segments by topic and format."""
@@ -174,24 +196,33 @@ class TestAuditFixes(unittest.TestCase):
 
     def test_analytics_reporter_traffic_and_top_queries(self):
         """Verify query_traffic_sources and query_top_videos handle blocked state and mock responses."""
-        reporter = YouTubeAnalyticsReporter()
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json") as f:
+            f.write('{"scopes": ["https://www.googleapis.com/auth/youtube.upload"]}')
+            f.flush()
+            temp_token = f.name
+        try:
+            reporter = YouTubeAnalyticsReporter(token_file=temp_token)
 
-        # When blocked (no analytics scope in token.json)
-        traffic = reporter.query_traffic_sources()
-        self.assertEqual(traffic["status"], "BLOCKED")
+            # When blocked (no analytics scope in token)
+            traffic = reporter.query_traffic_sources()
+            self.assertEqual(traffic["status"], "BLOCKED")
 
-        top = reporter.query_top_videos()
-        self.assertEqual(top["status"], "BLOCKED")
+            top = reporter.query_top_videos()
+            self.assertEqual(top["status"], "BLOCKED")
+        finally:
+            if os.path.exists(temp_token):
+                os.remove(temp_token)
 
         # With mock service
+        reporter_mock = YouTubeAnalyticsReporter()
         mock_service = MagicMock()
         mock_service.reports().query().execute.return_value = {"rows": [["SEARCH", 25]]}
-        with patch.object(reporter, "get_service", return_value=(mock_service, None)):
-            res_t = reporter.query_traffic_sources()
+        with patch.object(reporter_mock, "get_service", return_value=(mock_service, None)):
+            res_t = reporter_mock.query_traffic_sources()
             self.assertEqual(res_t["status"], "SUCCESS")
             self.assertIn("rows", res_t["data"])
 
-            res_v = reporter.query_top_videos()
+            res_v = reporter_mock.query_top_videos()
             self.assertEqual(res_v["status"], "SUCCESS")
 
     def test_auth_setup_inspect_token(self):
@@ -214,7 +245,7 @@ class TestAuditFixes(unittest.TestCase):
         self.assertTrue(status["credentials_file_exists"])
         self.assertTrue(status["token_file_exists"])
         self.assertTrue(status["has_upload_scopes"])
-        self.assertFalse(status["has_analytics_scope"])
+        self.assertTrue(status["has_analytics_scope"])
         self.assertNotIn("client_secret", status)
 
 

@@ -72,7 +72,9 @@ class YouTubeAnalyticsReporter:
             )
             return False, self.status_detail
 
-        return True, "OAuth scopes verified."
+        self.auth_status = "READY"
+        self.status_detail = "OAuth scopes verified and active."
+        return True, self.status_detail
 
     def get_service(self):
         """Builds YouTube Analytics API v2 client if authorized."""
