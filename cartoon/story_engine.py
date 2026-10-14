@@ -874,14 +874,25 @@ class StoryEngine:
 
     def build_youtube_metadata(self, story):
         """Builds YouTube metadata dictionary ready for uploader.py."""
-        title = f"{story['title_hi']} | {story['title_en']} 🚂 | Cartoon for Kids | Fun Learning Kids"
+        # Calculate dynamic episode count to ensure 100% unique titles and avoid spam filters
+        history = self.load_history()
+        completed_runs = [h for h in history if h.get("status") in ("uploaded", "completed")]
+        ep_num = len(completed_runs) + 1
+
+        story_runs = [h for h in completed_runs if h.get("story_id") == story["story_id"]]
+        story_part = len(story_runs) + 1
+
+        ep_tag = f"Ep {ep_num}"
+        part_tag = f" (Part {story_part})" if story_part > 1 else ""
+
+        title = f"{ep_tag}: {story['title_hi']}{part_tag} | {story['short_title']} 🚂 | Fun Learning Kids"
         if len(title) > 100:
-            title = f"{story['title_hi']} | {story['short_title']} | Cartoon for Kids | Fun Learning Kids"
+            title = f"{ep_tag}: {story['title_hi']} | {story['short_title']} 🚂 | Fun Learning Kids"
             if len(title) > 100:
                 title = title[:97] + "..."
 
         desc_parts = [
-            f"{story['title_hi']} ({story['title_en']})",
+            f"🌟 Episode {ep_num}: {story['title_hi']} ({story['title_en']})",
             "",
             f"✨ सीख (Moral): {story['moral_hi']}",
             f"✨ Moral: {story['moral_en']}",
@@ -889,6 +900,9 @@ class StoryEngine:
             "Welcome to Fun Learning Kids! Enjoy this lovely animated Hindi cartoon episode "
             "crafted specially for toddlers, preschoolers, and young learners. "
             "Subscribe for daily educational cartoons, stories, and fun songs!",
+            "",
+            f"🎭 Main Character: {story.get('main_character', '').title()}",
+            f"🎨 Animation Style: {story.get('style')}",
             "",
             "#FunLearningKids #KidsCartoon #HindiAnimation #MoralStories #KidsLearning #CartoonAnimation"
         ]

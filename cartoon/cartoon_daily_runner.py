@@ -355,6 +355,13 @@ def run_daily_cartoon(dry_run=True, style=None, story_id=None, privacy_status="p
 
         # Live Upload
         logger.info("🚀 Initiating YouTube Upload for Cartoon Video 3...")
+        from video_validator import validate_video_file
+        valid_vid, val_err, _, _ = validate_video_file(video_file)
+        if not valid_vid:
+            logger.error(f"❌ Pre-upload cartoon video validation failed: {val_err}")
+            job_tracker.update_job("cartoon", state=job_tracker.STATE_FAILED, error_message=val_err)
+            return False
+
         from uploader import upload_video_to_youtube
 
         job_tracker.update_job(

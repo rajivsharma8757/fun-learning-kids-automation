@@ -56,11 +56,20 @@ VOICE_RATE = '+0%'
 # ==========================================
 # VIDEO & THUMBNAIL SETTINGS
 # ==========================================
-VIDEO_WIDTH = 1280
-VIDEO_HEIGHT = 720
+# Video format mode: 'landscape' (16:9, 1280x720) or 'shorts' (9:16, 1080x1920)
+VIDEO_FORMAT = os.getenv("VIDEO_FORMAT", "landscape").lower()
+
+if VIDEO_FORMAT == "shorts":
+    VIDEO_WIDTH = 1080
+    VIDEO_HEIGHT = 1920
+    THUMBNAIL_WIDTH = 1080
+    THUMBNAIL_HEIGHT = 1920
+else:
+    VIDEO_WIDTH = 1280
+    VIDEO_HEIGHT = 720
+    THUMBNAIL_WIDTH = 1280
+    THUMBNAIL_HEIGHT = 720
 VIDEO_FPS = 25
-THUMBNAIL_WIDTH = 1280
-THUMBNAIL_HEIGHT = 720
 
 # Subtitle styling for FFmpeg
 SUBTITLE_STYLE = (

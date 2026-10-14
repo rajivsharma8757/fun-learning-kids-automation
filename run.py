@@ -6,7 +6,8 @@ from datetime import datetime
 
 from config import (
     BASE_DIR, AUDIO_DIR, VIDEO_DIR, THUMBNAIL_DIR, LOG_DIR,
-    LOG_FILE, LAST_RUN_FILE, SCHEDULE_SLOTS, TOPICS
+    LOG_FILE, LAST_RUN_FILE, SCHEDULE_SLOTS, TOPICS,
+    UPLOADS_HISTORY_FILE, VIDEO_FORMAT
 )
 from content_manager import ContentManager
 from voice_generator import generate_voice
@@ -190,10 +191,45 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
         logger.info("🎉 [DRY-RUN] Pipeline completed successfully!")
         return True
 
+    # Format a unique, high-CTR title to prevent YouTube spam filtering on repeated scripts
+    script_usage_count = 1
+    if os.path.exists(UPLOADS_HISTORY_FILE):
+        try:
+            import json
+            with open(UPLOADS_HISTORY_FILE, "r", encoding="utf-8") as f:
+                all_uploads = json.load(f)
+            script_usage_count = sum(
+                1 for u in all_uploads
+                if u.get("script_id") == script.get("id") or u.get("title") == script.get("title")
+            ) + 1
+        except Exception:
+            script_usage_count = 1
+
+    base_title = script["title"]
+    if script_usage_count > 1:
+        if " | Fun Learning Kids" in base_title:
+            prefix = base_title.replace(" | Fun Learning Kids", "")
+            final_title = f"{prefix} | Ep {script_usage_count} | Fun Learning Kids"
+        else:
+            final_title = f"{base_title} (Ep {script_usage_count})"
+    else:
+        final_title = base_title
+
+    if VIDEO_FORMAT == "shorts":
+        if "#Shorts" not in final_title and len(final_title) <= 91:
+            final_title = f"{final_title} #Shorts"
+
+    if len(final_title) > 100:
+        final_title = final_title[:97] + "..."
+
+    final_desc = script["description"]
+    if VIDEO_FORMAT == "shorts" and "#Shorts" not in final_desc:
+        final_desc = f"{final_desc}\n\n#Shorts #YouTubeShorts"
+
     upload_metadata = {
-        "title": script["title"],
-        "description": script["description"],
-        "tags": script["tags"],
+        "title": final_title,
+        "description": final_desc,
+        "tags": script["tags"] + (["Shorts", "YouTube Shorts"] if VIDEO_FORMAT == "shorts" else []),
         "topic": chosen_topic
     }
 
