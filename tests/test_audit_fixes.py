@@ -207,6 +207,16 @@ class TestAuditFixes(unittest.TestCase):
         self.assertEqual(config.DAILY_SLOT_FORMATS["evening"], config.FORMAT_LANDSCAPE)
         self.assertEqual(config.DAILY_SLOT_FORMATS["cartoon"], config.FORMAT_LANDSCAPE)
 
+    def test_check_youtube_access_inspection(self):
+        """Verify check_youtube_access tool inspects credentials and token without leaking secrets."""
+        from tools.check_youtube_access import inspect_credentials_and_token
+        status = inspect_credentials_and_token()
+        self.assertTrue(status["credentials_file_exists"])
+        self.assertTrue(status["token_file_exists"])
+        self.assertTrue(status["has_upload_scopes"])
+        self.assertFalse(status["has_analytics_scope"])
+        self.assertNotIn("client_secret", status)
+
 
 if __name__ == "__main__":
     unittest.main()
