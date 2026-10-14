@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 from PIL import Image, ImageDraw, ImageFont
 from config import THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, CHANNEL_NAME
@@ -32,32 +32,37 @@ def get_font(size):
                 continue
     return ImageFont.load_default()
 
-def create_thumbnail(image_path, topic, short_title, output_thumb_path):
+def create_thumbnail(image_path, topic, short_title, output_thumb_path, format_profile=None):
     """
-    Creates an eye-catching, kid-friendly YouTube thumbnail (1280x720).
+    Creates an eye-catching, kid-friendly YouTube thumbnail (1280x720 landscape or 1080x1920 shorts).
     - Crops and centers the topic image
     - Adds vibrant category banner and story title
     - Adds channel watermark badge
     """
+    from config import FORMAT_PROFILES, DEFAULT_FORMAT
+    prof = FORMAT_PROFILES.get(format_profile or DEFAULT_FORMAT, FORMAT_PROFILES[DEFAULT_FORMAT])
+    thumb_w = prof['thumbnail_width']
+    thumb_h = prof['thumbnail_height']
+
     try:
         os.makedirs(os.path.dirname(output_thumb_path), exist_ok=True)
         img = Image.open(image_path).convert("RGBA")
 
-        # Scale and crop to fit exactly 1280x720
-        target_aspect = THUMBNAIL_WIDTH / THUMBNAIL_HEIGHT
+        # Scale and crop to fit target aspect ratio
+        target_aspect = thumb_w / thumb_h
         im_aspect = img.width / img.height
 
         if im_aspect > target_aspect:
-            new_h = THUMBNAIL_HEIGHT
+            new_h = thumb_h
             new_w = int(new_h * im_aspect)
         else:
-            new_w = THUMBNAIL_WIDTH
+            new_w = thumb_w
             new_h = int(new_w / im_aspect)
 
         resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        left = (new_w - THUMBNAIL_WIDTH) // 2
-        top = (new_h - THUMBNAIL_HEIGHT) // 2
-        thumb = resized.crop((left, top, left + THUMBNAIL_WIDTH, top + THUMBNAIL_HEIGHT))
+        left = (new_w - thumb_w) // 2
+        top = (new_h - thumb_h) // 2
+        thumb = resized.crop((left, top, left + thumb_w, top + thumb_h))
 
         # Create overlay for text
         overlay = Image.new("RGBA", thumb.size, (0, 0, 0, 0))

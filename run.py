@@ -82,11 +82,17 @@ def record_lock(slot_id):
     except Exception as e:
         logger.error(f"Failed to write lock to {LAST_RUN_FILE}: {e}")
 
-def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", force=False, interactive=False):
+def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", force=False, interactive=False, format_profile=None):
     """
     Main execution pipeline for Fun Learning Kids:
     Topic -> Script -> Hindi Voice -> Images -> Video + Subtitles -> Thumbnail -> YouTube Upload -> Log
     """
+    from config import FORMAT_PROFILES, DEFAULT_FORMAT, FORMAT_SHORTS, FORMAT_LANDSCAPE
+    active_format = (format_profile or os.getenv("VIDEO_FORMAT") or DEFAULT_FORMAT).lower()
+    if active_format not in FORMAT_PROFILES:
+        active_format = DEFAULT_FORMAT
+    prof = FORMAT_PROFILES[active_format]
+
     today_str = datetime.now().strftime("%Y-%m-%d")
     current_slot = determine_current_slot(slot)
     slot_id = f"{today_str}_{current_slot}"
@@ -95,6 +101,7 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
     logger.info("==================================================")
     logger.info(f"🌟 Starting Fun Learning Kids Pipeline: {slot_id}")
     logger.info(f"   Timestamp: {run_timestamp}")
+    logger.info(f"   Profile:   {prof['name'].upper()} ({prof['width']}x{prof['height']}, {prof['aspect_ratio']})")
     logger.info(f"   Dry Run: {dry_run} | Privacy: {privacy_status} | Force: {force}")
     logger.info("==================================================")
 
@@ -148,7 +155,8 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
         audio_path=audio_path,
         srt_path=srt_to_use,
         output_video_path=video_path,
-        audio_duration=audio_duration
+        audio_duration=audio_duration,
+        format_profile=active_format
     )
     if not ok_video:
         logger.error(f"❌ Pipeline stopped: Video creation failed ({vid_err}).")
@@ -168,7 +176,8 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
         image_path=primary_image,
         topic=chosen_topic,
         short_title=short_title,
-        output_thumb_path=thumb_path
+        output_thumb_path=thumb_path,
+        format_profile=active_format
     )
     if not ok_thumb:
         logger.warning(f"⚠️ Thumbnail generation failed ({thumb_err}); proceeding with default video frame.")
@@ -215,7 +224,7 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
     else:
         final_title = base_title
 
-    if VIDEO_FORMAT == "shorts":
+    if active_format == FORMAT_SHORTS:
         if "#Shorts" not in final_title and len(final_title) <= 91:
             final_title = f"{final_title} #Shorts"
 
@@ -223,13 +232,13 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
         final_title = final_title[:97] + "..."
 
     final_desc = script["description"]
-    if VIDEO_FORMAT == "shorts" and "#Shorts" not in final_desc:
+    if active_format == FORMAT_SHORTS and "#Shorts" not in final_desc:
         final_desc = f"{final_desc}\n\n#Shorts #YouTubeShorts"
 
     upload_metadata = {
         "title": final_title,
         "description": final_desc,
-        "tags": script["tags"] + (["Shorts", "YouTube Shorts"] if VIDEO_FORMAT == "shorts" else []),
+        "tags": script["tags"] + (["Shorts", "YouTube Shorts"] if active_format == FORMAT_SHORTS else []),
         "topic": chosen_topic
     }
 
@@ -277,6 +286,7 @@ if __name__ == "__main__":
     parser.add_argument("--privacy", default="public", choices=["public", "unlisted", "private"], help="Upload privacy status")
     parser.add_argument("--force", action="store_true", help="Bypass slot completion check")
     parser.add_argument("--interactive", action="store_true", help="Allow interactive OAuth browser popup if needed")
+    parser.add_argument("--format", choices=["landscape", "shorts"], default=None, help="Explicit format profile: 'landscape' (16:9, 1280x720) or 'shorts' (9:16, 1080x1920)")
     parser.add_argument("--daily", action="store_true", help="Run full daily manager for 3-video target")
 
     args = parser.parse_args()
@@ -299,7 +309,8 @@ if __name__ == "__main__":
             dry_run=args.dry_run,
             privacy_status=args.privacy,
             force=args.force,
-            interactive=args.interactive
+            interactive=args.interactive,
+            format_profile=args.format
         )
     else:
         # Default laptop-on / scheduled daily automation mode (3 videos/day)

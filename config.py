@@ -54,36 +54,70 @@ VOICE_NAME = 'hi-IN-SwaraNeural'  # Clear, pleasant Hindi voice
 VOICE_RATE = '+0%'
 
 # ==========================================
-# VIDEO & THUMBNAIL SETTINGS
+# DUAL FORMAT PROFILES (LANDSCAPE & SHORTS)
 # ==========================================
-# Video format mode: 'landscape' (16:9, 1280x720) or 'shorts' (9:16, 1080x1920)
-VIDEO_FORMAT = os.getenv("VIDEO_FORMAT", "landscape").lower()
+FORMAT_LANDSCAPE = 'landscape'
+FORMAT_SHORTS = 'shorts'
+DEFAULT_FORMAT = FORMAT_LANDSCAPE
 
-if VIDEO_FORMAT == "shorts":
-    VIDEO_WIDTH = 1080
-    VIDEO_HEIGHT = 1920
-    THUMBNAIL_WIDTH = 1080
-    THUMBNAIL_HEIGHT = 1920
-else:
-    VIDEO_WIDTH = 1280
-    VIDEO_HEIGHT = 720
-    THUMBNAIL_WIDTH = 1280
-    THUMBNAIL_HEIGHT = 720
-VIDEO_FPS = 25
+FORMAT_PROFILES = {
+    FORMAT_LANDSCAPE: {
+        'name': 'landscape',
+        'width': 1280,
+        'height': 720,
+        'aspect_ratio': '16:9',
+        'fps': 25,
+        'thumbnail_width': 1280,
+        'thumbnail_height': 720,
+        'subtitle_style': (
+            'FontSize=26,'
+            'PrimaryColour=&H0000FFFF,'  # Bright yellow
+            'OutlineColour=&H00000000,'  # Black border
+            'BackColour=&H80000000,'     # Soft semi-transparent background
+            'BorderStyle=1,'
+            'Outline=2,'
+            'Shadow=1,'
+            'Alignment=2,'              # Bottom center
+            'MarginV=36,'
+            'Bold=1'
+        ),
+        'tag_shorts': False
+    },
+    FORMAT_SHORTS: {
+        'name': 'shorts',
+        'width': 1080,
+        'height': 1920,
+        'aspect_ratio': '9:16',
+        'fps': 25,
+        'thumbnail_width': 1080,
+        'thumbnail_height': 1920,
+        'subtitle_style': (
+            'FontSize=44,'
+            'PrimaryColour=&H0000FFFF,'  # Bright yellow
+            'OutlineColour=&H00000000,'  # Black border
+            'BackColour=&H80000000,'     # Soft semi-transparent background
+            'BorderStyle=1,'
+            'Outline=3,'
+            'Shadow=2,'
+            'Alignment=2,'              # Bottom center
+            'MarginV=260,'             # Safe zone above Shorts UI overlay
+            'Bold=1'
+        ),
+        'tag_shorts': True
+    }
+}
 
-# Subtitle styling for FFmpeg
-SUBTITLE_STYLE = (
-    'FontSize=26,'
-    'PrimaryColour=&H0000FFFF,'  # Bright yellow
-    'OutlineColour=&H00000000,'  # Black border
-    'BackColour=&H80000000,'     # Soft semi-transparent background
-    'BorderStyle=1,'
-    'Outline=2,'
-    'Shadow=1,'
-    'Alignment=2,'              # Bottom center
-    'MarginV=36,'
-    'Bold=1'
-)
+# Environment override or default landscape
+VIDEO_FORMAT = os.getenv("VIDEO_FORMAT", DEFAULT_FORMAT).lower()
+_active_profile = FORMAT_PROFILES.get(VIDEO_FORMAT, FORMAT_PROFILES[DEFAULT_FORMAT])
+
+# Backwards-compatible globals
+VIDEO_WIDTH = _active_profile['width']
+VIDEO_HEIGHT = _active_profile['height']
+VIDEO_FPS = _active_profile['fps']
+THUMBNAIL_WIDTH = _active_profile['thumbnail_width']
+THUMBNAIL_HEIGHT = _active_profile['thumbnail_height']
+SUBTITLE_STYLE = _active_profile['subtitle_style']
 
 # ==========================================
 # YOUTUBE METADATA & COMPLIANCE

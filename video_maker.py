@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import subprocess
 from config import VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS, SUBTITLE_STYLE
@@ -41,15 +41,24 @@ def generate_srt_file(subtitles_list, duration, output_srt_path):
         f.write("\n".join(lines))
     return True
 
-def create_video(image_path, audio_path, srt_path, output_video_path, audio_duration):
+def create_video(image_path, audio_path, srt_path, output_video_path, audio_duration, format_profile=None):
     """
     Creates high quality MP4 video using FFmpeg.
+    - format_profile: 'landscape' (1280x720, 16:9) or 'shorts' (1080x1920, 9:16).
+      Defaults to config.DEFAULT_FORMAT ('landscape').
     - Preserves aspect ratio with blurred background padding
-    - Burns styled child-friendly English subtitles
+    - Burns styled child-friendly English subtitles positioned for target format
     - Uses H.264 (yuv420p) and AAC audio
     - Matches audio duration precisely (-t)
-    - Strictly checks exit code and file integrity
+    - Strictly checks exit code, dimensions, and file integrity
     """
+    from config import FORMAT_PROFILES, DEFAULT_FORMAT
+    prof = FORMAT_PROFILES.get(format_profile or DEFAULT_FORMAT, FORMAT_PROFILES[DEFAULT_FORMAT])
+    w = prof['width']
+    h = prof['height']
+    fps = prof['fps']
+    sub_style = prof['subtitle_style']
+
     if os.path.exists(output_video_path):
         try:
             os.remove(output_video_path)
@@ -58,15 +67,15 @@ def create_video(image_path, audio_path, srt_path, output_video_path, audio_dura
 
     # Build filter complex for background blur + foreground center
     filter_chains = [
-        f"[0:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},boxblur=20:5[bg]",
-        f"[0:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=decrease[fg]",
+        f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur=20:5[bg]",
+        f"[0:v]scale={w}:{h}:force_original_aspect_ratio=decrease[fg]",
         "[bg][fg]overlay=(W-w)/2:(H-h)/2[base]"
     ]
 
     last_link = "[base]"
     if srt_path and os.path.exists(srt_path) and os.path.getsize(srt_path) > 0:
         escaped_srt = srt_path.replace("\\", "/").replace(":", "\\:")
-        sub_filter = f"subtitles='{escaped_srt}':force_style='{SUBTITLE_STYLE}'"
+        sub_filter = f"subtitles='{escaped_srt}':force_style='{sub_style}'"
         filter_chains.append(f"{last_link}{sub_filter}[v]")
         last_link = "[v]"
 
@@ -83,14 +92,14 @@ def create_video(image_path, audio_path, srt_path, output_video_path, audio_dura
         "-map", "1:a",
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
-        "-r", str(VIDEO_FPS),
+        "-r", str(fps),
         "-c:a", "aac",
         "-b:a", "192k",
         "-shortest",
         output_video_path
     ]
 
-    print("🎬 Rendering video with FFmpeg...")
+    print(f"🎬 Rendering video with FFmpeg (Profile: {prof['name']} {w}x{h})...")
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if res.returncode != 0:
@@ -110,14 +119,25 @@ def create_video(image_path, audio_path, srt_path, output_video_path, audio_dura
         # Verify video with ffprobe
         probe_cmd = [
             "ffprobe", "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height,duration:format=duration",
+            "-of", "json",
             output_video_path
         ]
         probe_res = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
-        video_dur = float(probe_res.stdout.strip())
-        
-        print(f"✅ Video created successfully: {output_video_path} ({video_dur:.2f}s, {size} bytes)")
+        import json
+        probe_data = json.loads(probe_res.stdout)
+        v_stream = probe_data.get("streams", [{}])[0]
+        actual_w = int(v_stream.get("width", 0))
+        actual_h = int(v_stream.get("height", 0))
+        video_dur = float(probe_data.get("format", {}).get("duration") or v_stream.get("duration", 0))
+
+        if actual_w != w or actual_h != h:
+            err_dim = f"Rendered video dimensions {actual_w}x{actual_h} do not match expected {w}x{h}"
+            print(f"❌ {err_dim}")
+            return False, err_dim
+
+        print(f"✅ Video created successfully: {output_video_path} ({actual_w}x{actual_h}, {video_dur:.2f}s, {size} bytes, profile={prof['name']})")
         return True, None
 
     except subprocess.TimeoutExpired:
