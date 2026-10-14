@@ -201,6 +201,12 @@ class TestAuditFixes(unittest.TestCase):
         self.assertTrue(valid)
         self.assertIsInstance(scopes, list)
 
+    def test_daily_slot_formats_allocation(self):
+        """Verify daily slot format mapping produces a healthy mix of Shorts and Landscape."""
+        self.assertEqual(config.DAILY_SLOT_FORMATS["morning"], config.FORMAT_SHORTS)
+        self.assertEqual(config.DAILY_SLOT_FORMATS["evening"], config.FORMAT_LANDSCAPE)
+        self.assertEqual(config.DAILY_SLOT_FORMATS["cartoon"], config.FORMAT_LANDSCAPE)
+
 
 if __name__ == "__main__":
     unittest.main()

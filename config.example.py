@@ -66,27 +66,71 @@ VOICE_NAME = 'hi-IN-SwaraNeural'  # Clear, pleasant Hindi voice
 VOICE_RATE = '+0%'
 
 # ==========================================
-# VIDEO & THUMBNAIL SETTINGS
+# DUAL FORMAT PROFILES (LANDSCAPE & SHORTS)
 # ==========================================
+FORMAT_LANDSCAPE = 'landscape'
+FORMAT_SHORTS = 'shorts'
+DEFAULT_FORMAT = FORMAT_LANDSCAPE
+
+FORMAT_PROFILES = {
+    FORMAT_LANDSCAPE: {
+        'name': 'landscape',
+        'width': 1280,
+        'height': 720,
+        'aspect_ratio': '16:9',
+        'fps': 25,
+        'thumbnail_width': 1280,
+        'thumbnail_height': 720,
+        'subtitle_style': (
+            'FontSize=26,'
+            'PrimaryColour=&H0000FFFF,'
+            'OutlineColour=&H00000000,'
+            'BackColour=&H80000000,'
+            'BorderStyle=1,'
+            'Outline=2,'
+            'Shadow=1,'
+            'Alignment=2,'
+            'MarginV=36,'
+            'Bold=1'
+        ),
+        'tag_shorts': False
+    },
+    FORMAT_SHORTS: {
+        'name': 'shorts',
+        'width': 1080,
+        'height': 1920,
+        'aspect_ratio': '9:16',
+        'fps': 25,
+        'thumbnail_width': 1080,
+        'thumbnail_height': 1920,
+        'subtitle_style': (
+            'FontSize=44,'
+            'PrimaryColour=&H0000FFFF,'
+            'OutlineColour=&H00000000,'
+            'BackColour=&H80000000,'
+            'BorderStyle=1,'
+            'Outline=3,'
+            'Shadow=2,'
+            'Alignment=2,'
+            'MarginV=260,'
+            'Bold=1'
+        ),
+        'tag_shorts': True
+    }
+}
+
+# Daily format split (Slot 1 = Shorts, Slot 2 = Landscape, Slot 3 = Cartoon)
+DAILY_SLOT_FORMATS = {
+    'morning': FORMAT_SHORTS,
+    'evening': FORMAT_LANDSCAPE,
+    'cartoon': FORMAT_LANDSCAPE
+}
+
 VIDEO_WIDTH = 1280
 VIDEO_HEIGHT = 720
 VIDEO_FPS = 25
 THUMBNAIL_WIDTH = 1280
 THUMBNAIL_HEIGHT = 720
-
-# Subtitle styling for FFmpeg
-SUBTITLE_STYLE = (
-    'FontSize=26,'
-    'PrimaryColour=&H0000FFFF,'  # Bright yellow
-    'OutlineColour=&H00000000,'  # Black border
-    'BackColour=&H80000000,'     # Soft semi-transparent background
-    'BorderStyle=1,'
-    'Outline=2,'
-    'Shadow=1,'
-    'Alignment=2,'              # Bottom center
-    'MarginV=36,'
-    'Bold=1'
-)
 
 # ==========================================
 # YOUTUBE METADATA & COMPLIANCE

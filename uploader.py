@@ -285,10 +285,18 @@ def verify_uploaded_video_on_channel(youtube, title, lookback_hours=12):
 def check_duplicate_title(title, history=None):
     """
     Checks if a title has already been used in previous uploads.
+    Inspects both uploads.json and historical all_youtube_videos_audit.json.
     Returns (is_duplicate: bool, previous_count: int, previous_record: dict or None)
     """
     if history is None:
-        history = load_upload_history()
+        history = list(load_upload_history())
+        audit_file = os.path.join(os.path.dirname(UPLOADS_HISTORY_FILE), "all_youtube_videos_audit.json")
+        if os.path.exists(audit_file):
+            try:
+                with open(audit_file, "r", encoding="utf-8") as af:
+                    history.extend(json.load(af))
+            except Exception:
+                pass
     clean_target = " ".join(title.lower().split())
     matches = [
         u for u in history

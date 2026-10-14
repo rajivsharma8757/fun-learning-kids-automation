@@ -27,7 +27,8 @@ from datetime import datetime
 
 from config import (
     BASE_DIR, UPLOADS_HISTORY_FILE, LOG_FILE,
-    LAST_RUN_FILE, DEFAULT_PRIVACY_STATUS
+    LAST_RUN_FILE, DEFAULT_PRIVACY_STATUS,
+    DAILY_SLOT_FORMATS, FORMAT_SHORTS, FORMAT_LANDSCAPE
 )
 from notifier import send_notification
 import job_tracker
@@ -209,17 +210,19 @@ def run_daily_automation(privacy_status=None, force=False, dry_run=False):
 
         # Step A: Normal Video 1 (Morning Slot)
         if not morning_done or force:
-            logger.info("\n▶️ Processing Today's Normal Video 1 (Slot: morning)...")
+            m_format = DAILY_SLOT_FORMATS.get("morning", FORMAT_SHORTS)
+            logger.info(f"\n▶️ Processing Today's Normal Video 1 (Slot: morning, Profile: {m_format.upper()})...")
             try:
                 m_ok = run_pipeline(
                     slot="morning",
                     privacy_status=target_privacy,
                     dry_run=dry_run,
-                    force=force
+                    force=force,
+                    format_profile=m_format
                 )
                 if m_ok:
                     action = "verified (dry-run)" if dry_run else "uploaded"
-                    logger.info(f"✅ Normal Video 1 {action} successfully!")
+                    logger.info(f"✅ Normal Video 1 ({m_format.upper()}) {action} successfully!")
                 else:
                     logger.error("❌ Normal Video 1 failed during generation/upload. Continuing to remaining jobs.")
             except Exception as e:
@@ -229,17 +232,19 @@ def run_daily_automation(privacy_status=None, force=False, dry_run=False):
 
         # Step B: Normal Video 2 (Evening Slot)
         if not evening_done or force:
-            logger.info("\n▶️ Processing Today's Normal Video 2 (Slot: evening)...")
+            e_format = DAILY_SLOT_FORMATS.get("evening", FORMAT_LANDSCAPE)
+            logger.info(f"\n▶️ Processing Today's Normal Video 2 (Slot: evening, Profile: {e_format.upper()})...")
             try:
                 e_ok = run_pipeline(
                     slot="evening",
                     privacy_status=target_privacy,
                     dry_run=dry_run,
-                    force=force
+                    force=force,
+                    format_profile=e_format
                 )
                 if e_ok:
                     action = "verified (dry-run)" if dry_run else "uploaded"
-                    logger.info(f"✅ Normal Video 2 {action} successfully!")
+                    logger.info(f"✅ Normal Video 2 ({e_format.upper()}) {action} successfully!")
                 else:
                     logger.error("❌ Normal Video 2 failed during generation/upload. Continuing to remaining jobs.")
             except Exception as e:

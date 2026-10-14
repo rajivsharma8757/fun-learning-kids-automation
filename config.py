@@ -120,6 +120,16 @@ FORMAT_PROFILES = {
 VIDEO_FORMAT = os.getenv("VIDEO_FORMAT", DEFAULT_FORMAT).lower()
 _active_profile = FORMAT_PROFILES.get(VIDEO_FORMAT, FORMAT_PROFILES[DEFAULT_FORMAT])
 
+# Balanced daily format allocation (Target: 3 Videos/Day)
+# Slot 1 (Morning): YouTube Shorts (9:16, 1080x1920) for mobile Shorts Feed discovery
+# Slot 2 (Evening): Landscape Educational Video (16:9, 1280x720) for widescreen viewing
+# Slot 3 (Cartoon): Landscape Cartoon Animation (16:9, 1280x720) alternating V1/V4 engines
+DAILY_SLOT_FORMATS = {
+    'morning': FORMAT_SHORTS,
+    'evening': FORMAT_LANDSCAPE,
+    'cartoon': FORMAT_LANDSCAPE
+}
+
 # Backwards-compatible globals
 VIDEO_WIDTH = _active_profile['width']
 VIDEO_HEIGHT = _active_profile['height']

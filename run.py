@@ -87,16 +87,21 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
     Main execution pipeline for Fun Learning Kids:
     Topic -> Script -> Hindi Voice -> Images -> Video + Subtitles -> Thumbnail -> YouTube Upload -> Log
     """
-    from config import FORMAT_PROFILES, DEFAULT_FORMAT, FORMAT_SHORTS, FORMAT_LANDSCAPE
-    active_format = (format_profile or os.getenv("VIDEO_FORMAT") or DEFAULT_FORMAT).lower()
-    if active_format not in FORMAT_PROFILES:
-        active_format = DEFAULT_FORMAT
-    prof = FORMAT_PROFILES[active_format]
-
     today_str = datetime.now().strftime("%Y-%m-%d")
     current_slot = determine_current_slot(slot)
     slot_id = f"{today_str}_{current_slot}"
     run_timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+    from config import FORMAT_PROFILES, DEFAULT_FORMAT, FORMAT_SHORTS, FORMAT_LANDSCAPE, DAILY_SLOT_FORMATS
+    active_format = (
+        format_profile
+        or os.getenv("VIDEO_FORMAT")
+        or DAILY_SLOT_FORMATS.get(current_slot)
+        or DEFAULT_FORMAT
+    ).lower()
+    if active_format not in FORMAT_PROFILES:
+        active_format = DEFAULT_FORMAT
+    prof = FORMAT_PROFILES[active_format]
 
     logger.info("==================================================")
     logger.info(f"🌟 Starting Fun Learning Kids Pipeline: {slot_id}")
@@ -195,24 +200,34 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
     # 6. Upload to YouTube
     if dry_run:
         logger.info("🧪 [DRY-RUN] Skipping YouTube upload step as requested.")
-        record_lock(slot_id)
         job_tracker.update_job(current_slot, state="dry_run_success", video_path=video_path, thumb_path=actual_thumb)
         logger.info("🎉 [DRY-RUN] Pipeline completed successfully!")
         return True
 
     # Format a unique, high-CTR title to prevent YouTube spam filtering on repeated scripts
     script_usage_count = 1
+    all_uploads = []
     if os.path.exists(UPLOADS_HISTORY_FILE):
         try:
-            import json
             with open(UPLOADS_HISTORY_FILE, "r", encoding="utf-8") as f:
-                all_uploads = json.load(f)
-            script_usage_count = sum(
-                1 for u in all_uploads
-                if u.get("script_id") == script.get("id") or u.get("title") == script.get("title")
-            ) + 1
+                all_uploads.extend(json.load(f))
         except Exception:
-            script_usage_count = 1
+            pass
+    audit_file = os.path.join(os.path.dirname(UPLOADS_HISTORY_FILE), "all_youtube_videos_audit.json")
+    if os.path.exists(audit_file):
+        try:
+            with open(audit_file, "r", encoding="utf-8") as af:
+                all_uploads.extend(json.load(af))
+        except Exception:
+            pass
+
+    clean_base = " ".join(script.get("title", "").lower().split())
+    script_usage_count = sum(
+        1 for u in all_uploads
+        if u.get("script_id") == script.get("id")
+        or " ".join(u.get("title", "").lower().split()) == clean_base
+        or " ".join(u.get("title", "").lower().split()).startswith(clean_base.split(" | ")[0].lower())
+    ) + 1
 
     base_title = script["title"]
     if script_usage_count > 1:

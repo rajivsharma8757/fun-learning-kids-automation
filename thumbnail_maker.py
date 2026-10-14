@@ -75,9 +75,20 @@ def create_thumbnail(image_path, topic, short_title, output_thumb_path, format_p
         })
         primary_col = info["primary"]
 
-        font_large = get_font(52)
-        font_med = get_font(42)
-        font_badge = get_font(30)
+        # Dynamic font scaling and placement based on format
+        is_shorts = (thumb_h > 1000)
+        if is_shorts:
+            font_large = get_font(68)
+            font_med = get_font(48)
+            font_badge = get_font(36)
+            banner_y = thumb_h - 420  # Safe zone above YouTube Shorts title/UI overlay
+            margin_x = 50
+        else:
+            font_large = get_font(52)
+            font_med = get_font(42)
+            font_badge = get_font(30)
+            banner_y = thumb_h - 170
+            margin_x = 40
 
         # 1. Top Category Pill / Banner
         category_text = info["label"]
@@ -87,26 +98,25 @@ def create_thumbnail(image_path, topic, short_title, output_thumb_path, format_p
 
         pill_pad_x, pill_pad_y = 30, 15
         draw.rounded_rectangle(
-            [40, 40, 40 + cat_w + pill_pad_x * 2, 40 + cat_h + pill_pad_y * 2],
+            [margin_x, margin_x, margin_x + cat_w + pill_pad_x * 2, margin_x + cat_h + pill_pad_y * 2],
             radius=15,
             fill=(*primary_col, 240),
             outline=(255, 255, 255, 255),
             width=3
         )
-        draw.text((40 + pill_pad_x, 40 + pill_pad_y - 4), category_text, font=font_med, fill=(255, 255, 255, 255))
+        draw.text((margin_x + pill_pad_x, margin_x + pill_pad_y - 4), category_text, font=font_med, fill=(255, 255, 255, 255))
 
-        # 2. Main Title Banner at Bottom
+        # 2. Main Title Banner
         title_text = short_title.upper()
         title_box = draw.textbbox((0, 0), title_text, font=font_large)
         title_w = title_box[2] - title_box[0]
         title_h = title_box[3] - title_box[1]
 
-        banner_y = THUMBNAIL_HEIGHT - 170
-        banner_w = min(title_w + 60, THUMBNAIL_WIDTH - 80)
-        
+        banner_w = min(title_w + 60, thumb_w - (margin_x * 2))
+
         # Background shadow card for title
         draw.rounded_rectangle(
-            [40, banner_y, 40 + banner_w, banner_y + title_h + 35],
+            [margin_x, banner_y, margin_x + banner_w, banner_y + title_h + 35],
             radius=18,
             fill=(0, 0, 0, 210),
             outline=(255, 255, 255, 240),
@@ -114,7 +124,7 @@ def create_thumbnail(image_path, topic, short_title, output_thumb_path, format_p
         )
         # Title text with outline
         draw.text(
-            (60, banner_y + 12),
+            (margin_x + 20, banner_y + 12),
             title_text,
             font=font_large,
             fill=(255, 235, 59, 255), # Bright golden yellow
@@ -128,10 +138,10 @@ def create_thumbnail(image_path, topic, short_title, output_thumb_path, format_p
         wm_w = wm_box[2] - wm_box[0]
         wm_h = wm_box[3] - wm_box[1]
 
-        wm_x = THUMBNAIL_WIDTH - wm_w - 65
-        wm_y = THUMBNAIL_HEIGHT - 65
+        wm_x = thumb_w - wm_w - 65
+        wm_y = thumb_h - 75 if is_shorts else thumb_h - 65
         draw.rounded_rectangle(
-            [wm_x, wm_y, THUMBNAIL_WIDTH - 30, THUMBNAIL_HEIGHT - 20],
+            [wm_x, wm_y, thumb_w - 30, wm_y + wm_h + 20],
             radius=10,
             fill=(233, 30, 99, 235), # Pink/Magenta kids pill
             outline=(255, 255, 255, 230),
