@@ -17,7 +17,7 @@ import os
 import sys
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 if sys.stdout.encoding != "utf-8":
     try:
@@ -68,7 +68,7 @@ class YouTubeAnalyticsReporter:
             self.status_detail = (
                 f"OAuth token is missing scope '{REQUIRED_ANALYTICS_SCOPE}'. "
                 "Current scopes only authorize video upload & Data API read. "
-                "Re-authorization with the analytics scope is required."
+                "Re-authorization with the analytics scope is required via 'python auth_setup.py'."
             )
             return False, self.status_detail
 
@@ -86,7 +86,6 @@ class YouTubeAnalyticsReporter:
         try:
             from google.oauth2.credentials import Credentials
             from googleapiclient.discovery import build
-            from googleapiclient.errors import HttpError
 
             creds = Credentials.from_authorized_user_file(self.token_file)
             service = build("youtubeAnalytics", "v2", credentials=creds)
@@ -113,9 +112,9 @@ class YouTubeAnalyticsReporter:
             }
 
         if not end_date:
-            end_date = (datetime.utcnow() - timedelta(days=2)).strftime("%Y-%m-%d")
+            end_date = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d")
         if not start_date:
-            start_date = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
+            start_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
 
         try:
             from googleapiclient.errors import HttpError
@@ -143,6 +142,100 @@ class YouTubeAnalyticsReporter:
         except Exception as e:
             return {"status": "EXCEPTION", "reason": str(e), "data": None}
 
+    def query_traffic_sources(self, start_date=None, end_date=None):
+        """
+        Retrieves views and watch time broken down by traffic source type:
+        e.g., NO_LINK_OTHER (direct/internal), YT_SEARCH, RELATED_VIDEO, SHORTS, EXT_URL, etc.
+        """
+        service, err = self.get_service()
+        if not service:
+            return {
+                "status": "BLOCKED",
+                "reason": err or self.status_detail,
+                "gcp_enable_url": GCP_CONSOLE_ENABLE_URL,
+                "data": None
+            }
+
+        if not end_date:
+            end_date = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d")
+        if not start_date:
+            start_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        try:
+            from googleapiclient.errors import HttpError
+            res = service.reports().query(
+                ids="channel==MINE",
+                startDate=start_date,
+                endDate=end_date,
+                metrics="views,estimatedMinutesWatched",
+                dimensions="insightTrafficSourceType",
+                sort="-views"
+            ).execute()
+            return {"status": "SUCCESS", "data": res}
+        except HttpError as e:
+            if e.resp.status == 403 and "accessNotConfigured" in str(e.content):
+                return {
+                    "status": "BLOCKED",
+                    "reason": "YouTube Analytics API is disabled in Google Cloud Project 597824175623.",
+                    "gcp_enable_url": GCP_CONSOLE_ENABLE_URL,
+                    "data": None
+                }
+            return {
+                "status": "API_ERROR",
+                "http_status": e.resp.status,
+                "reason": str(e),
+                "data": None
+            }
+        except Exception as e:
+            return {"status": "EXCEPTION", "reason": str(e), "data": None}
+
+    def query_top_videos(self, start_date=None, end_date=None, max_results=10):
+        """
+        Retrieves top performing videos by views and watch time.
+        """
+        service, err = self.get_service()
+        if not service:
+            return {
+                "status": "BLOCKED",
+                "reason": err or self.status_detail,
+                "gcp_enable_url": GCP_CONSOLE_ENABLE_URL,
+                "data": None
+            }
+
+        if not end_date:
+            end_date = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d")
+        if not start_date:
+            start_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        try:
+            from googleapiclient.errors import HttpError
+            res = service.reports().query(
+                ids="channel==MINE",
+                startDate=start_date,
+                endDate=end_date,
+                metrics="views,estimatedMinutesWatched,averageViewDuration",
+                dimensions="video",
+                sort="-views",
+                maxResults=max_results
+            ).execute()
+            return {"status": "SUCCESS", "data": res}
+        except HttpError as e:
+            if e.resp.status == 403 and "accessNotConfigured" in str(e.content):
+                return {
+                    "status": "BLOCKED",
+                    "reason": "YouTube Analytics API is disabled in Google Cloud Project 597824175623.",
+                    "gcp_enable_url": GCP_CONSOLE_ENABLE_URL,
+                    "data": None
+                }
+            return {
+                "status": "API_ERROR",
+                "http_status": e.resp.status,
+                "reason": str(e),
+                "data": None
+            }
+        except Exception as e:
+            return {"status": "EXCEPTION", "reason": str(e), "data": None}
+
     def generate_baseline_report(self, audit_file=os.path.join(HISTORY_DIR, "all_youtube_videos_audit.json")):
         """
         Compiles an honest, structured baseline report combining:
@@ -150,13 +243,15 @@ class YouTubeAnalyticsReporter:
         2. Segmentations across format, age, topics, and duration.
         3. Real status of YouTube Analytics API and impression CTR availability.
         """
+        ok, auth_detail = self.check_prerequisites()
+
         report = {
             "report_generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S IST"),
             "channel_name": "Fun Learning Kids",
             "channel_id": "UCcOA6heUaTbOUnx7ERF23Gw",
-            "analytics_api_status": "BLOCKED — API disabled in Google Cloud (Project 597824175623)",
+            "analytics_api_status": "BLOCKED — Scope 'yt-analytics.readonly' missing from token.json" if not ok else "ACTIVE",
             "analytics_api_enable_url": GCP_CONSOLE_ENABLE_URL,
-            "oauth_scope_status": "BLOCKED — Scope 'yt-analytics.readonly' not in token.json",
+            "oauth_scope_status": auth_detail,
             "impression_ctr_availability": (
                 "UNAVAILABLE via API — YouTube Analytics API v2 does NOT expose impressions "
                 "or CTR on channel reports. These metrics must be inspected manually in "
@@ -167,6 +262,7 @@ class YouTubeAnalyticsReporter:
                 "The API cannot separate developer self-testing views from real organic views. "
                 "Given small view counts (0 to 10), sample size is insufficient for statistical confidence."
             ),
+            "live_analytics": None,
             "totals": {
                 "total_videos": 0,
                 "public_videos": 0,
@@ -188,6 +284,21 @@ class YouTubeAnalyticsReporter:
             "topic_breakdown": {},
             "top_viewed_videos": []
         }
+
+        # Query live Analytics API if prerequisites pass
+        if ok:
+            overview_res = self.query_channel_overview()
+            sources_res = self.query_traffic_sources()
+            top_vids_res = self.query_top_videos()
+            if overview_res.get("status") == "SUCCESS":
+                report["analytics_api_status"] = "ACTIVE & CONNECTED"
+                report["live_analytics"] = {
+                    "channel_overview": overview_res.get("data"),
+                    "traffic_sources": sources_res.get("data"),
+                    "top_videos": top_vids_res.get("data")
+                }
+            else:
+                report["analytics_api_status"] = f"BLOCKED — {overview_res.get('reason')}"
 
         if not os.path.exists(audit_file):
             report["error"] = f"Audit file not found: {audit_file}"

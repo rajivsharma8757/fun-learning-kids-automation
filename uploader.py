@@ -33,7 +33,7 @@ from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 
 from config import (
-    CREDENTIALS_FILE, TOKEN_FILE, SCOPES,
+    CREDENTIALS_FILE, TOKEN_FILE, SCOPES, UPLOAD_SCOPES,
     UPLOADS_HISTORY_FILE, YOUTUBE_CATEGORY_ID,
     YOUTUBE_MADE_FOR_KIDS, DEFAULT_PRIVACY_STATUS,
     CHANNEL_NAME
@@ -115,14 +115,18 @@ def verify_channel(youtube):
         return None, None, None
 
 
-def get_authenticated_service(interactive=False):
+def get_authenticated_service(interactive=False, required_scopes=None):
     """
     Retrieves or refreshes YouTube API credentials.
     Uses token.json to run unattended.
     If token is expired or within 10 minutes of expiry, proactively refreshes it.
     Catches invalid_grant / revoked tokens and gives actionable instructions.
+
+    required_scopes: Scopes needed for this operation. Defaults to UPLOAD_SCOPES
+                     so daily video uploads succeed even if analytics scope is pending.
     """
     creds = None
+    target_scopes = required_scopes or UPLOAD_SCOPES
 
     if not os.path.exists(CREDENTIALS_FILE):
         raise FileNotFoundError(
@@ -135,11 +139,11 @@ def get_authenticated_service(interactive=False):
             with open(TOKEN_FILE, "r", encoding="utf-8") as tf:
                 tok_data = json.load(tf)
             tok_scopes = set(tok_data.get("scopes", []))
-            if not all(s in tok_scopes for s in SCOPES):
-                logger.warning(f"⚠️ Saved token.json is missing required scopes ({SCOPES}). Re-authorization required.")
+            if not all(s in tok_scopes for s in target_scopes):
+                logger.warning(f"⚠️ Saved token.json is missing required scopes ({target_scopes}). Re-authorization required.")
                 creds = None
             else:
-                creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+                creds = Credentials.from_authorized_user_file(TOKEN_FILE, list(tok_scopes))
         except Exception as e:
             logger.warning(f"⚠️ Warning reading {TOKEN_FILE}: {e}")
             creds = None
@@ -186,7 +190,7 @@ def get_authenticated_service(interactive=False):
                 f"ACTION REQUIRED: Run 'python auth_setup.py' interactively once to authorize."
             )
         logger.info("🔑 Opening browser for YouTube OAuth authorization...")
-        flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+        flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, target_scopes)
         creds = flow.run_local_server(port=0)
         with open(TOKEN_FILE, "w", encoding="utf-8") as f:
             f.write(creds.to_json())
@@ -278,6 +282,67 @@ def verify_uploaded_video_on_channel(youtube, title, lookback_hours=12):
         return False, None, None
 
 
+def check_duplicate_title(title, history=None):
+    """
+    Checks if a title has already been used in previous uploads.
+    Returns (is_duplicate: bool, previous_count: int, previous_record: dict or None)
+    """
+    if history is None:
+        history = load_upload_history()
+    clean_target = " ".join(title.lower().split())
+    matches = [
+        u for u in history
+        if " ".join(u.get("title", "").lower().split()) == clean_target
+    ]
+    if matches:
+        return True, len(matches), matches[-1]
+    return False, 0, None
+
+
+def check_video_processing_status(youtube, video_id, max_wait_sec=10):
+    """
+    Checks remote processing status on YouTube after upload.
+    Verifies YouTube accepted the file and did not reject it immediately
+    (e.g., corrupted container, bad audio codec, duplicate upload).
+    Returns (upload_status: str, rejection_reason: str or None, processing_status: str).
+    """
+    start = time.time()
+    while time.time() - start < max_wait_sec:
+        try:
+            res = youtube.videos().list(
+                part="status,processingDetails",
+                id=video_id
+            ).execute()
+            items = res.get("items", [])
+            if not items:
+                time.sleep(2)
+                continue
+
+            item = items[0]
+            status_obj = item.get("status", {})
+            proc_obj = item.get("processingDetails", {})
+
+            upload_status = status_obj.get("uploadStatus", "unknown")
+            rejection_reason = status_obj.get("rejectionReason")
+            proc_status = proc_obj.get("processingStatus", "unknown")
+
+            if upload_status == "rejected":
+                logger.error(f"❌ Video {video_id} was rejected by YouTube: {rejection_reason}")
+                return upload_status, rejection_reason, proc_status
+
+            if upload_status == "processed" or proc_status == "succeeded":
+                logger.info(f"✅ Video processing confirmed on YouTube (status: {upload_status}, proc: {proc_status})")
+                return upload_status, None, proc_status
+
+            time.sleep(2.5)
+        except Exception as e:
+            logger.warning(f"⚠️ Could not check video processing status: {e}")
+            break
+
+    logger.info(f"ℹ️ Video {video_id} is queued/processing on YouTube servers.")
+    return "uploaded", None, "processing"
+
+
 def _set_thumbnail_safe(youtube, video_id, thumbnail_path):
     """
     Uploads custom thumbnail with isolated error handling.
@@ -358,6 +423,15 @@ def upload_video_to_youtube(video_path, metadata, thumbnail_path=None, privacy_s
                 video_path=video_path
             )
         return UploadResult(True, vid_id, url, thumbnail_status="already_uploaded", is_duplicate=True)
+
+    # 2b. Check Duplicate Title Warning
+    title = metadata.get("title", "")
+    is_dupe_title, dupe_count, last_dupe = check_duplicate_title(title)
+    if is_dupe_title:
+        logger.warning(
+            f"⚠️ Duplicate title warning: Title '{title}' was uploaded {dupe_count} time(s) previously "
+            f"(last ID: {last_dupe.get('video_id')}). Ensure dynamic episode numbering is applied."
+        )
 
     # 3. Authenticate YouTube Client
     try:
@@ -492,10 +566,20 @@ def upload_video_to_youtube(video_path, metadata, thumbnail_path=None, privacy_s
     logger.info(f"\n🎉 Upload Confirmed Successful!")
     logger.info(f"🎥 Video Link: {video_url}")
 
-    # 7. Independent Custom Thumbnail Upload
+    # 7. Check Remote Video Processing Status
+    logger.info("⏳ Checking remote processing status on YouTube...")
+    up_status, rej_reason, proc_status = check_video_processing_status(youtube, video_id, max_wait_sec=10)
+    if up_status == "rejected":
+        rej_msg = f"YouTube rejected uploaded video: {rej_reason}"
+        logger.error(f"❌ {rej_msg}")
+        if slot:
+            job_tracker.update_job(slot, state=job_tracker.STATE_FAILED, error_message=rej_msg)
+        return UploadResult(False, video_id, video_url, error=rej_msg)
+
+    # 8. Independent Custom Thumbnail Upload
     thumb_status = _set_thumbnail_safe(youtube, video_id, thumbnail_path)
 
-    # 8. Record in History & Job Tracker
+    # 9. Record in History & Job Tracker
     record_upload_success({
         "timestamp": datetime.now().isoformat(),
         "filename": os.path.basename(video_path),
@@ -505,7 +589,9 @@ def upload_video_to_youtube(video_path, metadata, thumbnail_path=None, privacy_s
         "title": title,
         "topic": topic,
         "privacy": privacy,
-        "thumbnail_status": thumb_status
+        "thumbnail_status": thumb_status,
+        "upload_status": up_status,
+        "processing_status": proc_status
     })
 
     if slot:

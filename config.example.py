@@ -24,10 +24,19 @@ CREDENTIALS_FILE = os.path.join(BASE_DIR, 'credentials.json')
 # Generated automatically upon first interactive run via auth_setup.py
 TOKEN_FILE = os.path.join(BASE_DIR, 'token.json')
 
-SCOPES = [
+# Upload and management scopes (required for daily video uploads)
+UPLOAD_SCOPES = [
     'https://www.googleapis.com/auth/youtube.upload',
     'https://www.googleapis.com/auth/youtube.readonly'
 ]
+
+# Read-only Analytics scope (for channel and video performance metrics)
+ANALYTICS_SCOPES = [
+    'https://www.googleapis.com/auth/yt-analytics.readonly'
+]
+
+# All scopes combined (used during interactive auth_setup.py)
+SCOPES = UPLOAD_SCOPES + ANALYTICS_SCOPES
 
 # ==========================================
 # HISTORY & TRACKING FILES

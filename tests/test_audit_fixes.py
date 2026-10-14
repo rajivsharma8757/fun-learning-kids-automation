@@ -3,10 +3,15 @@ test_audit_fixes.py
 -------------------
 Unit tests for the YouTube channel audit fixes:
 1. Cartoon title deduplication & episode numbering
-2. Dual format profiles (Landscape 16:9 vs Shorts 9:16)
-3. Subtitle safe zone margins and thumbnail resolutions
-4. Zero-duration video validation
+2. Zero-duration video rejection in validator
+3. Dual format profiles (Landscape 16:9 vs Shorts 9:16)
+4. Subtitle safe zone margins and thumbnail resolutions
 5. Analytics reporter prerequisite checking and error handling
+6. Baseline report data parsing and segmentations
+7. Uploader duplicate title check
+8. Uploader post-upload video processing status check
+9. Analytics reporter traffic source and top video queries
+10. Auth setup token inspection
 """
 
 import os
@@ -23,6 +28,8 @@ import config
 from video_validator import validate_video_file
 from thumbnail_maker import create_thumbnail
 from analytics_reporter import YouTubeAnalyticsReporter, REQUIRED_ANALYTICS_SCOPE
+from uploader import check_duplicate_title, check_video_processing_status
+import auth_setup
 
 
 class TestAuditFixes(unittest.TestCase):
@@ -119,6 +126,80 @@ class TestAuditFixes(unittest.TestCase):
         self.assertEqual(report["totals"]["total_views"], 50)
         self.assertEqual(report["format_breakdown"]["landscape_16_9"]["count"], 100)
         self.assertEqual(report["format_breakdown"]["shorts_9_16"]["count"], 0)
+
+    def test_uploader_check_duplicate_title(self):
+        """Verify check_duplicate_title detects duplicate titles regardless of extra whitespace/casing."""
+        history = [
+            {"title": "Good Habits for Kids | Wash Hands", "video_id": "VID_123"},
+            {"title": "Bantu Robot | Science Lab Ep 1", "video_id": "VID_456"}
+        ]
+        # Match case-insensitive
+        is_dupe, count, rec = check_duplicate_title("good habits for kids | wash hands", history=history)
+        self.assertTrue(is_dupe)
+        self.assertEqual(count, 1)
+        self.assertEqual(rec["video_id"], "VID_123")
+
+        # Unique title
+        is_dupe, count, rec = check_duplicate_title("Brand New Episode | Good Morning", history=history)
+        self.assertFalse(is_dupe)
+        self.assertEqual(count, 0)
+        self.assertIsNone(rec)
+
+    def test_uploader_check_video_processing_status(self):
+        """Verify check_video_processing_status handles succeeded and rejected statuses."""
+        mock_youtube = MagicMock()
+
+        # 1. Successful processing
+        mock_youtube.videos().list().execute.return_value = {
+            "items": [{
+                "status": {"uploadStatus": "processed"},
+                "processingDetails": {"processingStatus": "succeeded"}
+            }]
+        }
+        up_st, rej, proc_st = check_video_processing_status(mock_youtube, "VID_OK", max_wait_sec=1)
+        self.assertEqual(up_st, "processed")
+        self.assertIsNone(rej)
+        self.assertEqual(proc_st, "succeeded")
+
+        # 2. Rejected video
+        mock_youtube.videos().list().execute.return_value = {
+            "items": [{
+                "status": {"uploadStatus": "rejected", "rejectionReason": "duplicate"},
+                "processingDetails": {"processingStatus": "failed"}
+            }]
+        }
+        up_st, rej, proc_st = check_video_processing_status(mock_youtube, "VID_REJ", max_wait_sec=1)
+        self.assertEqual(up_st, "rejected")
+        self.assertEqual(rej, "duplicate")
+
+    def test_analytics_reporter_traffic_and_top_queries(self):
+        """Verify query_traffic_sources and query_top_videos handle blocked state and mock responses."""
+        reporter = YouTubeAnalyticsReporter()
+
+        # When blocked (no analytics scope in token.json)
+        traffic = reporter.query_traffic_sources()
+        self.assertEqual(traffic["status"], "BLOCKED")
+
+        top = reporter.query_top_videos()
+        self.assertEqual(top["status"], "BLOCKED")
+
+        # With mock service
+        mock_service = MagicMock()
+        mock_service.reports().query().execute.return_value = {"rows": [["SEARCH", 25]]}
+        with patch.object(reporter, "get_service", return_value=(mock_service, None)):
+            res_t = reporter.query_traffic_sources()
+            self.assertEqual(res_t["status"], "SUCCESS")
+            self.assertIn("rows", res_t["data"])
+
+            res_v = reporter.query_top_videos()
+            self.assertEqual(res_v["status"], "SUCCESS")
+
+    def test_auth_setup_inspect_token(self):
+        """Verify auth_setup safely inspects existing token without exposing secrets."""
+        exists, scopes, valid = auth_setup.inspect_current_token()
+        self.assertTrue(exists)
+        self.assertTrue(valid)
+        self.assertIsInstance(scopes, list)
 
 
 if __name__ == "__main__":
