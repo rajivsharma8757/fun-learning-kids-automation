@@ -28,7 +28,9 @@ from datetime import datetime
 from config import (
     BASE_DIR, UPLOADS_HISTORY_FILE, LOG_FILE,
     LAST_RUN_FILE, DEFAULT_PRIVACY_STATUS,
-    DAILY_SLOT_FORMATS, FORMAT_SHORTS, FORMAT_LANDSCAPE
+    DAILY_SLOT_FORMATS, FORMAT_SHORTS, FORMAT_LANDSCAPE,
+    CHANNEL_NAME, ACTIVE_PROFILE_NAME, PROFILE_NANHE_SEEKHO,
+    PROFILE_FUN_LEARNING, ACTIVE_PROFILE
 )
 from notifier import send_notification
 import job_tracker
@@ -166,11 +168,31 @@ def run_daily_automation(privacy_status=None, force=False, dry_run=False):
         return True
 
     try:
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        now = datetime.now()
+        today_str = now.strftime("%Y-%m-%d")
+        weekday = now.weekday()  # 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
+        weekday_name = now.strftime("%A")
         target_privacy = privacy_status or DEFAULT_PRIVACY_STATUS
 
+        # Calculate scheduled target based on channel profile
+        if ACTIVE_PROFILE_NAME == PROFILE_NANHE_SEEKHO:
+            # 1 Short daily (morning, 09:00 IST)
+            # 2 Long videos weekly (Wed: Cartoon, Sun: Educational)
+            is_wednesday = (weekday == 2)
+            is_sunday = (weekday == 6)
+            is_long_day = is_wednesday or is_sunday
+            daily_target = 2 if is_long_day else 1
+            long_slot_for_today = "cartoon" if is_wednesday else ("evening" if is_sunday else None)
+        else:
+            is_long_day = True
+            daily_target = 3
+            long_slot_for_today = "all"
+
         logger.info("==================================================")
-        logger.info(f"🚀 Fun Learning Kids Daily Manager Started: {today_str} (Target: 3 Videos/Day)")
+        logger.info(f"🚀 {CHANNEL_NAME} Daily Manager Started: {today_str} ({weekday_name})")
+        logger.info(f"   Target for Today: {daily_target} Video(s) | Profile: {ACTIVE_PROFILE_NAME}")
+        if ACTIVE_PROFILE_NAME == PROFILE_NANHE_SEEKHO:
+            logger.info(f"   Cadence: 1 Short daily (09:00) + 2 Long/week (Wed: Cartoon, Sun: Story)")
         logger.info(f"   Dry Run: {dry_run} | Force: {force} | Privacy: {target_privacy}")
         logger.info("==================================================")
 
@@ -178,7 +200,7 @@ def run_daily_automation(privacy_status=None, force=False, dry_run=False):
         if not wait_for_internet(max_wait_seconds=90, check_interval=5):
             msg = "Internet connection is unavailable. Automation will retry automatically on next scheduled trigger."
             logger.error(f"❌ {msg}")
-            send_notification("Fun Learning Kids — Alert", msg, error=True)
+            send_notification(f"{CHANNEL_NAME} — Alert", msg, error=True)
             return False
 
         # 2. Check Existing Progress for Today
@@ -189,21 +211,25 @@ def run_daily_automation(privacy_status=None, force=False, dry_run=False):
         cart_count = len(cartoon_uploads)
         total_count = norm_count + cart_count
 
-        logger.info(f"📊 Current Today Progress ({today_str}): {total_count}/3 videos confirmed on YouTube.")
-        logger.info(f"   - Normal Videos: {norm_count}/2 | Cartoon Video: {cart_count}/1")
+        logger.info(f"📊 Current Today Progress ({today_str}): {total_count}/{daily_target} videos confirmed on YouTube.")
+        logger.info(f"   - Normal Videos: {norm_count} | Cartoon Video: {cart_count}")
 
         # Determine which slots need execution
-        # Normal Slot 1 ('morning')
+        # Normal Slot 1 ('morning' - Daily Short)
         morning_done = job_tracker.is_slot_completed("morning", today_str) or (norm_count >= 1)
-        # Normal Slot 2 ('evening')
-        evening_done = job_tracker.is_slot_completed("evening", today_str) or (norm_count >= 2)
-        # Cartoon Slot 3 ('cartoon')
+        # Normal Slot 2 ('evening' - Long Educational Video, Sunday or legacy)
+        evening_needed = force or (ACTIVE_PROFILE_NAME != PROFILE_NANHE_SEEKHO) or (is_sunday)
+        evening_done = job_tracker.is_slot_completed("evening", today_str) or (norm_count >= (2 if ACTIVE_PROFILE_NAME != PROFILE_NANHE_SEEKHO else 1))
+        # Cartoon Slot 3 ('cartoon' - Cartoon Animation Video, Wednesday or legacy)
+        cartoon_needed = force or (ACTIVE_PROFILE_NAME != PROFILE_NANHE_SEEKHO) or (is_wednesday)
         cartoon_done = job_tracker.is_slot_completed("cartoon", today_str) or (cart_count >= 1)
 
-        if not force and morning_done and evening_done and cartoon_done:
-            logger.info("🎉 Today's daily target of 3 videos is ALREADY COMPLETED!")
-            logger.info("   (2 Normal Educational Videos + 1 Cartoon Video). System is idle.")
-            return True
+        # Check if today's planned target is already satisfied
+        if not force:
+            if morning_done and (not evening_needed or evening_done) and (not cartoon_needed or cartoon_done):
+                logger.info(f"🎉 Today's scheduled target of {daily_target} video(s) for {CHANNEL_NAME} is ALREADY COMPLETED!")
+                logger.info("   System is idle.")
+                return True
 
         from run import run_pipeline
         from cartoon.cartoon_daily_runner import run_daily_cartoon
@@ -231,7 +257,7 @@ def run_daily_automation(privacy_status=None, force=False, dry_run=False):
             logger.info("⏩ Normal Video 1 (morning slot) already completed today. Skipping.")
 
         # Step B: Normal Video 2 (Evening Slot)
-        if not evening_done or force:
+        if (evening_needed and not evening_done) or force:
             e_format = DAILY_SLOT_FORMATS.get("evening", FORMAT_LANDSCAPE)
             logger.info(f"\n▶️ Processing Today's Normal Video 2 (Slot: evening, Profile: {e_format.upper()})...")
             try:
@@ -249,11 +275,13 @@ def run_daily_automation(privacy_status=None, force=False, dry_run=False):
                     logger.error("❌ Normal Video 2 failed during generation/upload. Continuing to remaining jobs.")
             except Exception as e:
                 logger.error(f"❌ Normal Video 2 encountered isolated exception: {e}", exc_info=True)
+        elif not evening_needed:
+            logger.info("⏩ Normal Video 2 (evening slot) not scheduled for today (scheduled on Sundays). Skipping.")
         else:
             logger.info("⏩ Normal Video 2 (evening slot) already completed today. Skipping.")
 
         # Step C: Cartoon Video 3 (Cartoon Slot) - Complete Failure Isolation
-        if not cartoon_done or force:
+        if (cartoon_needed and not cartoon_done) or force:
             logger.info("\n▶️ Processing Today's Cartoon Animation Video (Video 3)...")
             try:
                 c_ok = run_daily_cartoon(
@@ -268,6 +296,8 @@ def run_daily_automation(privacy_status=None, force=False, dry_run=False):
                     logger.error("❌ Cartoon Video 3 failed. Inspect cartoon logs.")
             except Exception as e:
                 logger.error(f"❌ Cartoon Video 3 encountered isolated exception: {e}", exc_info=True)
+        elif not cartoon_needed:
+            logger.info("⏩ Cartoon Video 3 (cartoon slot) not scheduled for today (scheduled on Wednesdays). Skipping.")
         else:
             logger.info("⏩ Cartoon Video 3 already completed today. Skipping.")
 
@@ -279,13 +309,13 @@ def run_daily_automation(privacy_status=None, force=False, dry_run=False):
         summary = job_tracker.get_daily_summary(today_str)
 
         logger.info("\n" + "=" * 70)
-        logger.info(f"📋 FUN LEARNING KIDS — MASTER DAILY SUMMARY ({today_str})")
+        logger.info(f"📋 {CHANNEL_NAME.upper()} — MASTER DAILY SUMMARY ({today_str})")
         logger.info("=" * 70)
 
         slots_display = [
-            ("Slot 1 (Normal Video 1 - morning)", "morning"),
-            ("Slot 2 (Normal Video 2 - evening)", "evening"),
-            ("Slot 3 (Cartoon Video 3 - cartoon)", "cartoon")
+            ("Slot 1 (Daily Short - morning)", "morning"),
+            ("Slot 2 (Long Educational - evening)", "evening"),
+            ("Slot 3 (Cartoon Animation - cartoon)", "cartoon")
         ]
 
         for label, s_key in slots_display:
@@ -314,20 +344,20 @@ def run_daily_automation(privacy_status=None, force=False, dry_run=False):
                 logger.info(f"     Status: {state} | Error: {err or 'Pending or uncompleted'}")
 
         logger.info("-" * 70)
-        logger.info(f"🎯 Daily Result: {final_total}/3 confirmed uploads on YouTube.")
-        logger.info(f"   Normal Videos: {final_norm}/2 | Cartoon Video: {final_cart}/1")
+        logger.info(f"🎯 Daily Result: {final_total}/{daily_target} confirmed uploads on YouTube.")
+        logger.info(f"   Normal Videos: {final_norm} | Cartoon Video: {final_cart}")
         logger.info("=" * 70)
 
-        all_completed = (final_total >= 3) or (dry_run and final_norm >= 2 and final_cart >= 1)
+        all_completed = (final_total >= daily_target) or (dry_run and final_total >= 1)
 
         if all_completed:
-            success_msg = f"All 3 daily videos for {today_str} have been successfully produced and uploaded!"
+            success_msg = f"All scheduled videos ({final_total}/{daily_target}) for {today_str} have been successfully produced and uploaded!"
             logger.info(f"🎉🎉 {success_msg}")
             if not dry_run:
-                send_notification("Fun Learning Kids", success_msg)
+                send_notification(CHANNEL_NAME, success_msg)
             return True
         else:
-            pending_count = 3 - final_total
+            pending_count = daily_target - final_total
             logger.warning(f"⚠️ {pending_count} video(s) still pending for today ({today_str}). Will resume on next trigger.")
             return False
 

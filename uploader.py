@@ -36,7 +36,9 @@ from config import (
     CREDENTIALS_FILE, TOKEN_FILE, SCOPES, UPLOAD_SCOPES,
     UPLOADS_HISTORY_FILE, YOUTUBE_CATEGORY_ID,
     YOUTUBE_MADE_FOR_KIDS, DEFAULT_PRIVACY_STATUS,
-    CHANNEL_NAME
+    CHANNEL_NAME, LEGACY_PROTECTED_CHANNEL_ID,
+    ALLOW_LEGACY_CHANNEL_UPLOADS, ACTIVE_PROFILE_NAME,
+    PROFILE_NANHE_SEEKHO, PROFILE_FUN_LEARNING
 )
 from video_validator import validate_video_file
 import job_tracker
@@ -113,6 +115,42 @@ def verify_channel(youtube):
     except Exception as e:
         logger.warning(f"⚠️ Could not verify channel details: {e}")
         return None, None, None
+
+
+def check_channel_upload_safety(youtube):
+    """
+    Enforces two-layer upload safeguards:
+    Layer 1: Hard block against legacy channel UCcOA6heUaTbOUnx7ERF23Gw (Fun Learning Kids).
+    Layer 2: Verification of authenticated channel identity to prevent cross-channel contamination.
+    """
+    ch_id, ch_title, uploads_pl = verify_channel(youtube)
+    if not ch_id:
+        logger.warning("⚠️ Could not verify channel identity from YouTube API.")
+        return ch_id, ch_title, uploads_pl
+
+    # Layer 1: Strict lock against old channel
+    if ch_id == LEGACY_PROTECTED_CHANNEL_ID:
+        if not ALLOW_LEGACY_CHANNEL_UPLOADS:
+            err = (
+                f"🛑 CRITICAL SAFETY INTERVENTION: Attempted upload to protected legacy channel '{ch_title}' (ID: {ch_id}).\n"
+                f"Uploads to Fun Learning Kids are STRICTLY LOCKED to preserve the existing channel!\n"
+                f"Please authorize the new 'Nanhe Seekho Club' account via 'python auth_setup.py'."
+            )
+            logger.critical(err)
+            raise RuntimeError(err)
+
+    # Layer 2: Profile mismatch check
+    if ACTIVE_PROFILE_NAME == PROFILE_NANHE_SEEKHO:
+        if ch_title and "fun learning kids" in ch_title.lower():
+            err = (
+                f"🛑 CRITICAL SAFETY INTERVENTION: Active profile is '{PROFILE_NANHE_SEEKHO}' but authenticated channel is '{ch_title}'!\n"
+                f"Halting upload immediately to prevent uploading to the wrong channel."
+            )
+            logger.critical(err)
+            raise RuntimeError(err)
+
+    return ch_id, ch_title, uploads_pl
+
 
 
 def get_authenticated_service(interactive=False, required_scopes=None):
@@ -242,6 +280,33 @@ def is_already_uploaded(video_path):
             if item.get("video_id"):
                 return True, item
     return False, None
+
+
+def is_legacy_upload(video_path):
+    """
+    Checks if a video was already uploaded to the legacy Fun Learning Kids channel.
+    Cross-checks the legacy uploads.json and catalog to prevent un-rebranded uploads.
+    """
+    if not os.path.exists(video_path):
+        return False, None
+
+    filename = os.path.basename(video_path)
+    file_hash = compute_file_hash(video_path)
+
+    legacy_uploads_file = os.path.join(os.path.dirname(UPLOADS_HISTORY_FILE), "uploads.json")
+    if os.path.exists(legacy_uploads_file) and legacy_uploads_file != UPLOADS_HISTORY_FILE:
+        try:
+            with open(legacy_uploads_file, "r", encoding="utf-8") as f:
+                leg_hist = json.load(f)
+            for item in leg_hist:
+                if (file_hash and item.get("file_hash") == file_hash) or item.get("filename") == filename:
+                    if item.get("video_id"):
+                        return True, item
+        except Exception:
+            pass
+
+    return False, None
+
 
 
 def verify_uploaded_video_on_channel(youtube, title, lookback_hours=12):
@@ -441,6 +506,20 @@ def upload_video_to_youtube(video_path, metadata, thumbnail_path=None, privacy_s
             f"(last ID: {last_dupe.get('video_id')}). Ensure dynamic episode numbering is applied."
         )
 
+    # 2c. Check Un-rebranded Legacy Channel Video (Fun Learning Kids)
+    if ACTIVE_PROFILE_NAME == PROFILE_NANHE_SEEKHO and not metadata.get("allow_repurposed_legacy"):
+        is_leg, leg_rec = is_legacy_upload(video_path)
+        if is_leg:
+            err_msg = (
+                f"🛑 Video '{os.path.basename(video_path)}' was previously uploaded to legacy channel "
+                f"(Video ID: {leg_rec.get('video_id')}). Un-rebranded re-uploads are blocked.\n"
+                f"Please re-render this video with '{CHANNEL_NAME}' branding and outro."
+            )
+            logger.error(f"❌ {err_msg}")
+            if slot:
+                job_tracker.update_job(slot, state=job_tracker.STATE_FAILED, error_message=err_msg)
+            return UploadResult(False, None, None, error=err_msg)
+
     # 3. Authenticate YouTube Client
     try:
         youtube = get_authenticated_service(interactive=interactive)
@@ -451,11 +530,21 @@ def upload_video_to_youtube(video_path, metadata, thumbnail_path=None, privacy_s
             job_tracker.update_job(slot, state=job_tracker.STATE_FAILED, error_message=err_msg)
         return UploadResult(False, None, None, error=err_msg)
 
+    # 3b. Verify Channel Upload Safety (Two-Layer Safeguard)
+    try:
+        ch_id, ch_title, uploads_pl = check_channel_upload_safety(youtube)
+    except Exception as e:
+        err_msg = f"Channel upload safety check failed: {e}"
+        logger.error(f"❌ {err_msg}")
+        if slot:
+            job_tracker.update_job(slot, state=job_tracker.STATE_FAILED, error_message=err_msg)
+        return UploadResult(False, None, None, error=err_msg)
+
     # 4. Prepare Metadata & State
     privacy = privacy_status or DEFAULT_PRIVACY_STATUS
-    title = metadata.get("title", "Kids Learning Video | Fun Learning Kids")
-    description = metadata.get("description", "Welcome to Fun Learning Kids!")
-    tags = metadata.get("tags", ["kids", "learning", "fun learning kids"])
+    title = metadata.get("title", f"Kids Learning Video | {CHANNEL_NAME}")
+    description = metadata.get("description", f"Welcome to {CHANNEL_NAME}!")
+    tags = metadata.get("tags", ["kids", "learning", CHANNEL_NAME.lower()])
     topic = metadata.get("topic", "general")
 
     file_hash = compute_file_hash(video_path)

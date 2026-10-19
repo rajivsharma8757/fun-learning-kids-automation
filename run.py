@@ -7,7 +7,7 @@ from datetime import datetime
 from config import (
     BASE_DIR, AUDIO_DIR, VIDEO_DIR, THUMBNAIL_DIR, LOG_DIR,
     LOG_FILE, LAST_RUN_FILE, SCHEDULE_SLOTS, TOPICS,
-    UPLOADS_HISTORY_FILE, VIDEO_FORMAT
+    UPLOADS_HISTORY_FILE, VIDEO_FORMAT, CHANNEL_NAME
 )
 from content_manager import ContentManager
 from voice_generator import generate_voice
@@ -104,7 +104,7 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
     prof = FORMAT_PROFILES[active_format]
 
     logger.info("==================================================")
-    logger.info(f"🌟 Starting Fun Learning Kids Pipeline: {slot_id}")
+    logger.info(f"🌟 Starting {CHANNEL_NAME} Pipeline: {slot_id}")
     logger.info(f"   Timestamp: {run_timestamp}")
     logger.info(f"   Profile:   {prof['name'].upper()} ({prof['width']}x{prof['height']}, {prof['aspect_ratio']})")
     logger.info(f"   Dry Run: {dry_run} | Privacy: {privacy_status} | Force: {force}")
@@ -230,14 +230,14 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
     ) + 1
 
     base_title = script["title"]
+    # Strip any old legacy channel suffix
+    for old_suffix in [" | Fun Learning Kids", " - Fun Learning Kids", " | fun learning kids"]:
+        base_title = base_title.replace(old_suffix, "")
+
     if script_usage_count > 1:
-        if " | Fun Learning Kids" in base_title:
-            prefix = base_title.replace(" | Fun Learning Kids", "")
-            final_title = f"{prefix} | Ep {script_usage_count} | Fun Learning Kids"
-        else:
-            final_title = f"{base_title} (Ep {script_usage_count})"
+        final_title = f"{base_title} | Ep {script_usage_count} | {CHANNEL_NAME}"
     else:
-        final_title = base_title
+        final_title = f"{base_title} | {CHANNEL_NAME}"
 
     if active_format == FORMAT_SHORTS:
         if "#Shorts" not in final_title and len(final_title) <= 91:
@@ -246,14 +246,29 @@ def run_pipeline(topic=None, slot=None, dry_run=False, privacy_status="public", 
     if len(final_title) > 100:
         final_title = final_title[:97] + "..."
 
-    final_desc = script["description"]
+    raw_desc = script["description"]
+    # Dynamically rebrand description to active channel name
+    final_desc = raw_desc.replace("Fun Learning Kids", CHANNEL_NAME).replace("fun learning kids", CHANNEL_NAME)
+    final_desc = final_desc.replace("#FunLearningKids", f"#{CHANNEL_NAME.replace(' ', '')}")
+
     if active_format == FORMAT_SHORTS and "#Shorts" not in final_desc:
         final_desc = f"{final_desc}\n\n#Shorts #YouTubeShorts"
+
+    # Rebrand tags
+    raw_tags = script.get("tags", [])
+    final_tags = [
+        t.replace("fun learning kids", CHANNEL_NAME.lower()).replace("Fun Learning Kids", CHANNEL_NAME)
+        for t in raw_tags
+    ]
+    if CHANNEL_NAME.lower() not in [t.lower() for t in final_tags]:
+        final_tags.append(CHANNEL_NAME.lower())
+    if active_format == FORMAT_SHORTS:
+        final_tags.extend(["Shorts", "YouTube Shorts"])
 
     upload_metadata = {
         "title": final_title,
         "description": final_desc,
-        "tags": script["tags"] + (["Shorts", "YouTube Shorts"] if active_format == FORMAT_SHORTS else []),
+        "tags": final_tags,
         "topic": chosen_topic
     }
 

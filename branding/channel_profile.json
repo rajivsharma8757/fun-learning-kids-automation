@@ -1,0 +1,94 @@
+{
+  "channel_identity": {
+    "name": "Nanhe Seekho Club",
+    "name_hi": "नन्हे सीखो क्लब",
+    "tagline": "Little Minds, Big Discoveries!",
+    "tagline_hi": "छोटे कदम, बड़ी खोज!",
+    "target_age_group": "2-8 years (Preschool & Early Elementary)",
+    "language": "Hindi (with English visual cues & subtitles)",
+    "category": "Education (YouTube Category 27)",
+    "made_for_kids": true,
+    "coppa_compliant": true
+  },
+  "handle_suggestions": [
+    {
+      "handle": "@NanheSeekhoClub",
+      "status": "Recommended (Primary)",
+      "rationale": "Exact match to brand name, professional and memorable"
+    },
+    {
+      "handle": "@NanheSeekho",
+      "status": "Short Alternative",
+      "rationale": "Concise, punchy, easily typed by voice or mobile"
+    },
+    {
+      "handle": "@NanheSeekhoKids",
+      "status": "Category-Specific",
+      "rationale": "Reinforces kids education niche"
+    },
+    {
+      "handle": "@NanheClub",
+      "status": "Ultra-Short Alternative",
+      "rationale": "Catchy and easy to remember"
+    }
+  ],
+  "about_description": "Welcome to Nanhe Seekho Club (नन्हे सीखो क्लब) — Little Minds, Big Discoveries! 🌟🎈\n\nNanhe Seekho Club is a joyful, safe, and engaging Hindi educational universe created especially for toddlers, preschoolers, and young explorers (ages 2–8).\n\nEvery video is thoughtfully designed to ignite curiosity, inspire positive values, and make early learning delightful through:\n✨ Original Animated Adventures & Panchatantra Moral Tales (प्यारी नैतिक कहानियाँ)\n✨ Daily Good Habits, Hygiene & Manners (अच्छी आदतें और संस्कार)\n✨ Hindi Varnamala, ABC Phonics & Number Counting (वर्णमाला और गिनती)\n✨ Animal Kingdom, Nature & Curiosity Facts (जानवर और प्रकृति की खोज)\n✨ Colors, Shapes & Creative Thinking (रंग और आकृतियाँ)\n\n📅 UPLOAD SCHEDULE:\n• 🌟 Daily Shorts (Every Morning at 9:00 AM IST) — Quick 30-second bites of fun discovery!\n• 🎬 Special Long Videos (Every Wednesday & Sunday at 5:00 PM IST) — Full animated stories & lessons!\n\n🛡️ SAFE FOR KIDS:\nAll content on Nanhe Seekho Club is 100% wholesome, family-friendly, and fully COPPA-compliant (\"Made for Kids\").\n\nSubscribe to Nanhe Seekho Club and join our learning family! 🚀🌈",
+  "channel_keywords": [
+    "nanhe seekho club",
+    "nanhe seekho",
+    "kids learning hindi",
+    "hindi moral stories",
+    "bachon ki kahaniya",
+    "kids educational cartoons",
+    "hindi cartoons for children",
+    "learn hindi for kids",
+    "hindi varnamala",
+    "numbers counting hindi",
+    "good habits for kids hindi",
+    "preschool learning hindi",
+    "little minds big discoveries",
+    "panchatantra hindi stories",
+    "safe kids videos",
+    "fun learning for toddlers"
+  ],
+  "brand_colors": {
+    "primary_sunshine_yellow": "#FFD166",
+    "secondary_sky_blue": "#118AB2",
+    "accent_coral_pink": "#EF476F",
+    "vibrant_emerald_green": "#06D6A0",
+    "deep_slate_navy": "#073B4C",
+    "soft_cloud_white": "#FFFFFF"
+  },
+  "content_pillars": [
+    {
+      "pillar": "Moral Stories & Values",
+      "format": "Landscape & Shorts",
+      "core_theme": "Kindness, honesty, sharing, courage, empathy, respect"
+    },
+    {
+      "pillar": "Good Habits & Daily Routines",
+      "format": "Shorts (Daily) & Landscape",
+      "core_theme": "Brushing teeth, washing hands, eating vegetables, sleeping early, reading books"
+    },
+    {
+      "pillar": "Early Foundations (ABC, Numbers, Hindi)",
+      "format": "Shorts & Interactive Videos",
+      "core_theme": "Hindi Akshar, English alphabet, counting 1-10, primary colors, shapes"
+    },
+    {
+      "pillar": "Animal & Nature Wonders",
+      "format": "Shorts & Cartoons",
+      "core_theme": "Animal sounds, habitats, fun facts, weather, space exploration"
+    },
+    {
+      "pillar": "Original Cartoon Adventures",
+      "format": "Landscape (Wed & Sun)",
+      "core_theme": "Bantu Robot, Mimi Kitten, Koko Squirrel, Bholu Puppy solving problems together"
+    }
+  ],
+  "schedule_strategy": {
+    "shorts_frequency": "1 high-quality Short per day (Morning 09:00 AM IST)",
+    "landscape_frequency": "2 long-form videos per week (Wednesday 17:00 IST & Sunday 17:00 IST)",
+    "weekly_total": "7 Shorts + 2 Landscape = 9 videos/week"
+  }
+}

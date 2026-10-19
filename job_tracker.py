@@ -27,9 +27,9 @@ if sys.platform == "win32":
 else:
     msvcrt = None
 
-from config import BASE_DIR, HISTORY_DIR, LOG_DIR
+from config import BASE_DIR, HISTORY_DIR, LOG_DIR, DAILY_JOBS_FILE
 
-DAILY_JOB_STATES_FILE = os.path.join(HISTORY_DIR, "daily_job_states.json")
+DAILY_JOB_STATES_FILE = DAILY_JOBS_FILE
 PROCESS_LOCK_FILE = os.path.join(LOG_DIR, "daily_manager.lock")
 
 logger = logging.getLogger("kids_automation")

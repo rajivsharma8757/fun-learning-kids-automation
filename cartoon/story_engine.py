@@ -34,7 +34,7 @@ if sys.stdout.encoding != "utf-8":
         pass
 
 sys.path.insert(0, r"C:\kids_automation")
-from cartoon.config import CARTOON_HISTORY_FILE
+from cartoon.config import CARTOON_HISTORY_FILE, CHANNEL_NAME, CHANNEL_NAME_HI
 from cartoon.variety_manager import VarietyManager
 
 logger = logging.getLogger("kids_automation")
@@ -818,15 +818,43 @@ class StoryEngine:
         """
         return self.variety_mgr.determine_next_style(forced_style=forced_style)
 
+    def _brand_story(self, story):
+        """Dynamically applies active channel branding to story scenes and tags."""
+        if not story:
+            return story
+        branded = dict(story)
+        if "scenes" in story:
+            branded_scenes = []
+            for sc in story["scenes"]:
+                sc_copy = dict(sc)
+                if "text_hi" in sc_copy:
+                    sc_copy["text_hi"] = sc_copy["text_hi"].replace("फन लर्निंग किड्स", CHANNEL_NAME_HI)
+                if "text_en" in sc_copy:
+                    sc_copy["text_en"] = sc_copy["text_en"].replace("Fun Learning Kids", CHANNEL_NAME)
+                branded_scenes.append(sc_copy)
+            branded["scenes"] = branded_scenes
+
+        if "tags" in story:
+            branded_tags = [
+                t.replace("Fun Learning Kids", CHANNEL_NAME).replace("fun learning kids", CHANNEL_NAME.lower())
+                for t in story["tags"]
+            ]
+            if CHANNEL_NAME not in branded_tags:
+                branded_tags.append(CHANNEL_NAME)
+            branded["tags"] = branded_tags
+
+        return branded
+
     def get_next_story(self, forced_story_id=None, forced_style=None):
         """
         Selects the next story adhering strictly to 1:1 alternation and anti-repetition rules.
         """
-        return self.variety_mgr.select_next_production_story(
+        story = self.variety_mgr.select_next_production_story(
             STORY_BANK,
             forced_style=forced_style,
             forced_story_id=forced_story_id
         )
+        return self._brand_story(story)
 
     def record_run(
         self,
@@ -885,33 +913,41 @@ class StoryEngine:
         ep_tag = f"Ep {ep_num}"
         part_tag = f" (Part {story_part})" if story_part > 1 else ""
 
-        title = f"{ep_tag}: {story['title_hi']}{part_tag} | {story['short_title']} 🚂 | Fun Learning Kids"
+        title = f"{ep_tag}: {story['title_hi']}{part_tag} | {story['short_title']} 🚂 | {CHANNEL_NAME}"
         if len(title) > 100:
-            title = f"{ep_tag}: {story['title_hi']} | {story['short_title']} 🚂 | Fun Learning Kids"
+            title = f"{ep_tag}: {story['title_hi']} | {story['short_title']} 🚂 | {CHANNEL_NAME}"
             if len(title) > 100:
                 title = title[:97] + "..."
 
+        hashtag_clean = CHANNEL_NAME.replace(" ", "")
         desc_parts = [
             f"🌟 Episode {ep_num}: {story['title_hi']} ({story['title_en']})",
             "",
             f"✨ सीख (Moral): {story['moral_hi']}",
             f"✨ Moral: {story['moral_en']}",
             "",
-            "Welcome to Fun Learning Kids! Enjoy this lovely animated Hindi cartoon episode "
+            f"Welcome to {CHANNEL_NAME}! Enjoy this lovely animated Hindi cartoon episode "
             "crafted specially for toddlers, preschoolers, and young learners. "
             "Subscribe for daily educational cartoons, stories, and fun songs!",
             "",
             f"🎭 Main Character: {story.get('main_character', '').title()}",
             f"🎨 Animation Style: {story.get('style')}",
             "",
-            "#FunLearningKids #KidsCartoon #HindiAnimation #MoralStories #KidsLearning #CartoonAnimation"
+            f"#{hashtag_clean} #KidsCartoon #HindiAnimation #MoralStories #KidsLearning #CartoonAnimation"
         ]
         description = "\n".join(desc_parts)
+
+        tags = [
+            t.replace("Fun Learning Kids", CHANNEL_NAME).replace("fun learning kids", CHANNEL_NAME.lower())
+            for t in story.get("tags", [])
+        ]
+        if CHANNEL_NAME not in tags:
+            tags.append(CHANNEL_NAME)
 
         return {
             "title": title,
             "description": description,
-            "tags": story["tags"],
+            "tags": tags,
             "topic": "cartoon_animation",
             "style": story["style"],
             "story_id": story["story_id"],

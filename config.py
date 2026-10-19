@@ -11,16 +11,86 @@ IMAGE_DIR = os.path.join(BASE_DIR, 'images')
 THUMBNAIL_DIR = os.path.join(BASE_DIR, 'thumbnails')
 LOG_DIR = os.path.join(BASE_DIR, 'logs')
 HISTORY_DIR = os.path.join(BASE_DIR, 'history')
+BRANDING_DIR = os.path.join(BASE_DIR, 'branding')
+MIGRATION_DIR = os.path.join(BASE_DIR, 'migration')
 
 # Ensure required directories exist
-for d in [AUDIO_DIR, VIDEO_DIR, IMAGE_DIR, THUMBNAIL_DIR, LOG_DIR, HISTORY_DIR]:
+for d in [AUDIO_DIR, VIDEO_DIR, IMAGE_DIR, THUMBNAIL_DIR, LOG_DIR, HISTORY_DIR, BRANDING_DIR, MIGRATION_DIR]:
     os.makedirs(d, exist_ok=True)
+
+# ==========================================
+# CHANNEL PROFILES & TWO-LAYER SAFEGUARDS
+# ==========================================
+PROFILE_NANHE_SEEKHO = "nanhe_seekho_club"
+PROFILE_FUN_LEARNING = "fun_learning_kids"
+
+# Legacy channel ID that is STRICTLY PROTECTED from any new uploads or modifications
+LEGACY_PROTECTED_CHANNEL_ID = "UCcOA6heUaTbOUnx7ERF23Gw"
+ALLOW_LEGACY_CHANNEL_UPLOADS = False
+
+CHANNEL_PROFILES = {
+    PROFILE_NANHE_SEEKHO: {
+        "channel_id": None,  # Dynamically verified via YouTube API upon authorization
+        "name": "Nanhe Seekho Club",
+        "name_hi": "नन्हे सीखो क्लब",
+        "tagline_en": "Little Minds, Big Discoveries!",
+        "tagline_hi": "छोटे कदम, बड़ी खोज!",
+        "handle": "@NanheSeekhoClub",
+        "token_file": os.path.join(BASE_DIR, "token_nanhe_seekho_club.json"),
+        "uploads_history_file": os.path.join(HISTORY_DIR, "uploads_nanhe_seekho_club.json"),
+        "images_history_file": os.path.join(HISTORY_DIR, "images_used_nanhe_seekho_club.json"),
+        "scripts_history_file": os.path.join(HISTORY_DIR, "scripts_used_nanhe_seekho_club.json"),
+        "topic_history_file": os.path.join(HISTORY_DIR, "topic_history_nanhe_seekho_club.json"),
+        "cartoon_history_file": os.path.join(HISTORY_DIR, "cartoon_history_nanhe_seekho_club.json"),
+        "daily_jobs_file": os.path.join(HISTORY_DIR, "daily_job_states_nanhe_seekho_club.json"),
+        "last_run_file": os.path.join(LOG_DIR, "last_run_nanhe_seekho_club.txt"),
+        "schedule": {
+            "daily_shorts": True,
+            "daily_shorts_time": "09:00",
+            "long_videos_per_week": 2,
+            "long_video_days": [2, 6],  # Wednesday (2) and Sunday (6)
+            "long_video_time": "17:00"
+        },
+        "is_active": True,
+        "is_protected": False
+    },
+    PROFILE_FUN_LEARNING: {
+        "channel_id": LEGACY_PROTECTED_CHANNEL_ID,
+        "name": "Fun Learning Kids",
+        "name_hi": "फन लर्निंग किड्स",
+        "tagline_en": "Fun Learning for Kids",
+        "tagline_hi": "बच्चों के लिए मजेदार सीख",
+        "handle": "@FunLearningKids",
+        "token_file": os.path.join(BASE_DIR, "token.json"),
+        "uploads_history_file": os.path.join(HISTORY_DIR, "uploads.json"),
+        "images_history_file": os.path.join(HISTORY_DIR, "images_used.json"),
+        "scripts_history_file": os.path.join(HISTORY_DIR, "scripts_used.json"),
+        "topic_history_file": os.path.join(HISTORY_DIR, "topic_history.json"),
+        "cartoon_history_file": os.path.join(HISTORY_DIR, "cartoon_history.json"),
+        "daily_jobs_file": os.path.join(HISTORY_DIR, "daily_job_states.json"),
+        "last_run_file": os.path.join(LOG_DIR, "last_run.txt"),
+        "schedule": {
+            "daily_shorts": True,
+            "daily_shorts_time": "09:00",
+            "evening_time": "21:30"
+        },
+        "is_active": False,
+        "is_protected": True  # Uploads strictly blocked by code
+    }
+}
+
+ACTIVE_PROFILE_NAME = os.getenv("CHANNEL_PROFILE", PROFILE_NANHE_SEEKHO).lower()
+if ACTIVE_PROFILE_NAME not in CHANNEL_PROFILES:
+    ACTIVE_PROFILE_NAME = PROFILE_NANHE_SEEKHO
+
+ACTIVE_PROFILE = CHANNEL_PROFILES[ACTIVE_PROFILE_NAME]
 
 # ==========================================
 # CREDENTIALS & AUTH
 # ==========================================
 CREDENTIALS_FILE = os.path.join(BASE_DIR, 'credentials.json')
-TOKEN_FILE = os.path.join(BASE_DIR, 'token.json')
+TOKEN_FILE = ACTIVE_PROFILE["token_file"]
+
 # Upload and management scopes (required for daily video uploads)
 UPLOAD_SCOPES = [
     'https://www.googleapis.com/auth/youtube.upload',
@@ -36,24 +106,28 @@ ANALYTICS_SCOPES = [
 SCOPES = UPLOAD_SCOPES + ANALYTICS_SCOPES
 
 # ==========================================
-# HISTORY & TRACKING FILES
+# HISTORY & TRACKING FILES (ACTIVE PROFILE)
 # ==========================================
-UPLOADS_HISTORY_FILE = os.path.join(HISTORY_DIR, 'uploads.json')
-IMAGES_HISTORY_FILE = os.path.join(HISTORY_DIR, 'images_used.json')
-SCRIPTS_HISTORY_FILE = os.path.join(HISTORY_DIR, 'scripts_used.json')
-TOPIC_HISTORY_FILE = os.path.join(HISTORY_DIR, 'topic_history.json')
+UPLOADS_HISTORY_FILE = ACTIVE_PROFILE["uploads_history_file"]
+IMAGES_HISTORY_FILE = ACTIVE_PROFILE["images_history_file"]
+SCRIPTS_HISTORY_FILE = ACTIVE_PROFILE["scripts_history_file"]
+TOPIC_HISTORY_FILE = ACTIVE_PROFILE["topic_history_file"]
+CARTOON_HISTORY_FILE = ACTIVE_PROFILE["cartoon_history_file"]
+DAILY_JOBS_FILE = ACTIVE_PROFILE["daily_jobs_file"]
+LAST_RUN_FILE = ACTIVE_PROFILE["last_run_file"]
+
 LOG_FILE = os.path.join(LOG_DIR, 'automation.log')
-LAST_RUN_FILE = os.path.join(LOG_DIR, 'last_run.txt')
 
 # ==========================================
-# TOPICS & SCHEDULE (2 VIDEOS PER DAY)
+# TOPICS & SCHEDULE CONFIGURATION
 # ==========================================
 TOPICS = ['moral_story', 'animal_story', 'good_habits', 'abc', 'numbers']
 
-# Schedule slots for the 2 daily videos
 SCHEDULE_SLOTS = {
     'morning': '09:00',
-    'evening': '21:30'
+    'evening': '17:00',
+    'shorts': '09:00',
+    'long_video': '17:00'
 }
 
 # ==========================================
@@ -120,14 +194,13 @@ FORMAT_PROFILES = {
 VIDEO_FORMAT = os.getenv("VIDEO_FORMAT", DEFAULT_FORMAT).lower()
 _active_profile = FORMAT_PROFILES.get(VIDEO_FORMAT, FORMAT_PROFILES[DEFAULT_FORMAT])
 
-# Balanced daily format allocation (Target: 3 Videos/Day)
-# Slot 1 (Morning): YouTube Shorts (9:16, 1080x1920) for mobile Shorts Feed discovery
-# Slot 2 (Evening): Landscape Educational Video (16:9, 1280x720) for widescreen viewing
-# Slot 3 (Cartoon): Landscape Cartoon Animation (16:9, 1280x720) alternating V1/V4 engines
+# Balanced slot format allocation
 DAILY_SLOT_FORMATS = {
     'morning': FORMAT_SHORTS,
+    'shorts': FORMAT_SHORTS,
     'evening': FORMAT_LANDSCAPE,
-    'cartoon': FORMAT_LANDSCAPE
+    'cartoon': FORMAT_LANDSCAPE,
+    'long_video': FORMAT_LANDSCAPE
 }
 
 # Backwards-compatible globals
@@ -141,7 +214,12 @@ SUBTITLE_STYLE = _active_profile['subtitle_style']
 # ==========================================
 # YOUTUBE METADATA & COMPLIANCE
 # ==========================================
-CHANNEL_NAME = 'Fun Learning Kids'
+CHANNEL_NAME = ACTIVE_PROFILE['name']
+CHANNEL_NAME_HI = ACTIVE_PROFILE['name_hi']
+CHANNEL_TAGLINE_EN = ACTIVE_PROFILE['tagline_en']
+CHANNEL_TAGLINE_HI = ACTIVE_PROFILE['tagline_hi']
+CHANNEL_HANDLE = ACTIVE_PROFILE['handle']
+
 YOUTUBE_CATEGORY_ID = '27'        # Education
 YOUTUBE_MADE_FOR_KIDS = True      # Mandatory for COPPA on kids channels
 DEFAULT_PRIVACY_STATUS = 'public' # Can be set to 'unlisted' for dry-runs

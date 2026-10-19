@@ -29,9 +29,11 @@ from analytics_reporter import YouTubeAnalyticsReporter
 
 
 def inspect_credentials_and_token():
+    target_token = TOKEN_FILE if os.path.exists(TOKEN_FILE) else os.path.join(BASE_DIR, "token.json")
     status = {
         "credentials_file_exists": os.path.exists(CREDENTIALS_FILE),
-        "token_file_exists": os.path.exists(TOKEN_FILE),
+        "token_file_exists": os.path.exists(target_token),
+        "target_token_file": target_token,
         "credentials_type": None,
         "token_scopes": [],
         "has_upload_scopes": False,
@@ -52,7 +54,7 @@ def inspect_credentials_and_token():
 
     if status["token_file_exists"]:
         try:
-            with open(TOKEN_FILE, "r", encoding="utf-8") as f:
+            with open(target_token, "r", encoding="utf-8") as f:
                 tdata = json.load(f)
             scopes = tdata.get("scopes", [])
             status["token_scopes"] = scopes

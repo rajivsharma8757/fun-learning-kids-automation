@@ -10,7 +10,14 @@ OUTPUT_DIR = os.path.join(CARTOON_DIR, 'output')
 THUMBNAILS_DIR = os.path.join(CARTOON_DIR, 'thumbnails')
 
 HISTORY_DIR = r'C:\kids_automation\history'
-CARTOON_HISTORY_FILE = os.path.join(HISTORY_DIR, 'cartoon_history.json')
+
+# Import active profile settings from main config
+try:
+    from config import CHANNEL_NAME, CARTOON_HISTORY_FILE, CHANNEL_NAME_HI
+except Exception:
+    CHANNEL_NAME = 'Nanhe Seekho Club'
+    CHANNEL_NAME_HI = 'नन्हे सीखो क्लब'
+    CARTOON_HISTORY_FILE = os.path.join(HISTORY_DIR, 'cartoon_history_nanhe_seekho_club.json')
 
 # Video Specifications
 WIDTH = 1280
@@ -27,5 +34,3 @@ SFX_VOLUME = 0.25       # Subtle action cues
 # Voice Configuration
 VOICE_NARRATOR = 'hi-IN-SwaraNeural'
 VOICE_MALE_CHAR = 'hi-IN-MadhurNeural'
-
-CHANNEL_NAME = 'Fun Learning Kids'

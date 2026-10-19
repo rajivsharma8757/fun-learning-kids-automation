@@ -6,6 +6,8 @@
 # --- Authentication & Secrets (CRITICAL) ---
 credentials.json
 token.json
+token*.json
+token_*.json
 .env
 .env.*
 *.pem

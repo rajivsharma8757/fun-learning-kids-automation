@@ -53,10 +53,11 @@ if __name__ == "__main__":
     if not os.path.exists(thumb_path):
         thumb_path = None
 
+    from config import CHANNEL_NAME
     metadata = {
-        "title": f"{topic.replace('_', ' ').title()} for Kids | Fun Learning Kids",
-        "description": f"Welcome to Fun Learning Kids!\n\nEnjoy today's educational {topic.replace('_', ' ')}.\n\nLike, Share & Subscribe!",
-        "tags": [topic.replace("_", " "), "kids learning", "fun learning kids"],
+        "title": f"{topic.replace('_', ' ').title()} for Kids | {CHANNEL_NAME}",
+        "description": f"Welcome to {CHANNEL_NAME}!\n\nEnjoy today's educational {topic.replace('_', ' ')}.\n\nLike, Share & Subscribe!",
+        "tags": [topic.replace("_", " "), "kids learning", CHANNEL_NAME.lower()],
         "topic": topic
     }
 
